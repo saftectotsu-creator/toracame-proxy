@@ -1,39 +1,41 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+const bodyParser = require('body-parser');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// CORSを有効にする（すべてのオリジンからのアクセスを許可）
 app.use(cors());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json());
 
-// URLエンコードされたデータをパースするミドルウェア
-app.use(express.urlencoded({ extended: true }));
-
-// プロキシエンドポイント
 app.get('/proxy', async (req, res) => {
-    const { url, id, password } = req.query;
-
-    if (!url) {
-        return res.status(400).send('URLが指定されていません。');
-    }
-
     try {
-        const finalUrl = `http://${id}:${password}@${url.split('//')[1]}`;
-        
-        // カメラにリクエストを送信
-        const response = await axios.get(finalUrl, {
-            responseType: 'arraybuffer' // 画像データをバイナリとして受け取る
+        const { url, id, password } = req.query;
+
+        if (!url || !id || !password) {
+            return res.status(400).send('URL, ID, and password are required.');
+        }
+
+        const authHeader = `Basic ${Buffer.from(`${id}:${password}`).toString('base64')}`;
+
+        const response = await axios.get(url, {
+            responseType: 'arraybuffer',
+            headers: {
+                'Authorization': authHeader
+            },
+            timeout: 10000 // タイムアウトを10秒に設定
         });
 
-        // カメラから受け取った画像データをクライアントに送信
+        // カメラから返されたContent-Typeヘッダーをそのままクライアントに返す
         res.set('Content-Type', response.headers['content-type']);
         res.send(Buffer.from(response.data));
 
     } catch (error) {
         console.error('プロキシエラー:', error.message);
-        res.status(500).send('画像の取得に失敗しました。');
+        console.error('エラーレスポンス:', error.response?.status, error.response?.statusText);
+        res.status(500).send('An error occurred on the proxy server.');
     }
 });
 
