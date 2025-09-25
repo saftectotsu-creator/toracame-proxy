@@ -58,7 +58,7 @@
 
     <div class="input-group">
         <label for="camera-url">カメラURL:</label>
-        <input type="text" id="camera-url" value="http://[カメラのIPアドレス]/image.cgi?resolution=720x480&compression=30&camera=1:1">
+        <input type="text" id="camera-url" value="http://kozou125.moonlight.warplink.ne.jp:8080/axis-cgi/jpg/image.cgi?resolution=320x240&compression=25&camera=1">
     </div>
 
     <div class="input-group">
@@ -80,9 +80,7 @@
     <div class="status-message" id="status-message"></div>
 
     <script>
-        // Node.jsプロキシサーバーのURLを設定します。
-        // ローカルでのテスト: "http://127.0.0.1:3000"
-        // Renderにデプロイ後: Renderで発行されたURL
+        // RenderにデプロイされたプロキシサーバーのURL
         const PROXY_SERVER_URL = "https://toracame-proxy.onrender.com"; 
 
         async function displayImage() {
@@ -98,7 +96,7 @@
                 return;
             }
 
-            // プロキシサーバーを経由するURLを構築します
+            // カメラの認証情報をプロキシサーバーのクエリパラメータとして送信します
             const proxyUrl = `${PROXY_SERVER_URL}/proxy?url=${encodeURIComponent(url)}&id=${encodeURIComponent(id)}&password=${encodeURIComponent(password)}`;
 
             try {

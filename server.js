@@ -6,6 +6,7 @@ const app = express();
 const port = process.env.PORT || 10000;
 
 app.use(cors());
+app.use(express.json());
 
 app.get('/proxy', async (req, res) => {
     try {
@@ -15,6 +16,7 @@ app.get('/proxy', async (req, res) => {
             return res.status(400).send('URL, ID, and password are required.');
         }
 
+        // ベーシック認証ヘッダーを作成
         const authHeader = `Basic ${Buffer.from(`${id}:${password}`).toString('base64')}`;
 
         const response = await axios.get(url, {
@@ -24,7 +26,7 @@ app.get('/proxy', async (req, res) => {
                 // 一部のカメラはブラウザからのリクエストを期待するため、User-Agentを追加
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36'
             },
-            timeout: 15000 // タイムアウトを15秒に延長
+            timeout: 15000 // タイムアウトを15秒に設定
         });
 
         // カメラから返されたContent-Typeヘッダーをそのままクライアントに返す
@@ -43,7 +45,7 @@ app.get('/proxy', async (req, res) => {
             console.error('リクエストが応答しませんでした。');
             res.status(504).send('Gateway Timeout');
         } else {
-            // その他のエラー
+            // その他の予期せぬエラー
             console.error('リクエスト設定エラー:', error.message);
             res.status(500).send('内部サーバーエラー');
         }
