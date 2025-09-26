@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+const { URL } = require('url'); // URLを扱うためのモジュール
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -8,8 +9,8 @@ const port = process.env.PORT || 10000;
 app.use(cors());
 app.use(express.json());
 
-// 認証情報をヘッダーに含めてリクエストを試行する関数
-async function attemptRequest(url, id, password) {
+// 認証情報をヘッダーに含めてリクエストを試行する関数（Basic認証）
+async function attemptHeaderAuth(url, id, password) {
     const authHeader = `Basic ${Buffer.from(`${id}:${password}`).toString('base64')}`;
 
     return axios.get(url, {
@@ -22,14 +23,20 @@ async function attemptRequest(url, id, password) {
     });
 }
 
-// 認証情報をURLに組み込んでリクエストを試行する関数
+// 認証情報をURLに組み込んでリクエストを試行する関数（URL認証）
 async function attemptUrlAuth(url, id, password) {
-    // URLをパースし、認証情報を挿入する
+    // 既存のURLからプロトコル、ホスト名、パスを取得
     const urlObj = new URL(url);
-    urlObj.username = id;
-    urlObj.password = password;
+    const protocol = urlObj.protocol;
+    const host = urlObj.host;
+    const pathAndQuery = urlObj.pathname + urlObj.search;
+    
+    // 認証情報をホスト名に組み込んだ新しいURLを作成
+    const newUrl = `${protocol}//${id}:${password}@${host}${pathAndQuery}`;
 
-    return axios.get(urlObj.toString(), {
+    console.log('試行URL:', newUrl); // ログに出力して確認
+    
+    return axios.get(newUrl, {
         responseType: 'arraybuffer',
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36'
@@ -52,7 +59,7 @@ app.get('/proxy', async (req, res) => {
         // 1. Basic認証 (ヘッダー経由) を試行
         try {
             console.log('認証試行 1: Basic認証 (ヘッダー)');
-            response = await attemptRequest(url, id, password);
+            response = await attemptHeaderAuth(url, id, password);
             success = true;
         } catch (error) {
             // 401エラーの場合、次の方法を試す
@@ -85,7 +92,9 @@ app.get('/proxy', async (req, res) => {
         console.error('プロキシエラー:', error.message);
         if (error.response) {
             console.error('最終ステータス:', error.response.status);
-            res.status(error.response.status).send('カメラサーバーエラー: ' + error.response.statusText);
+            // 最終的に401なら、認証情報をクライアントに返す
+            const status = error.response.status;
+            res.status(status).send(`カメラサーバーエラー: ${status} ${error.response.statusText}。認証情報を確認してください。`);
         } else if (error.request) {
             res.status(504).send('Gateway Timeout: カメラからの応答なし');
         } else {
