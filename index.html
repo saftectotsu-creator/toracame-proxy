@@ -63,12 +63,12 @@
 
     <div class="input-group">
         <label for="camera-id">ID:</label>
-        <input type="text" id="camera-id" value="[あなたのID]">
+        <input type="text" id="camera-id" value="">
     </div>
 
     <div class="input-group">
         <label for="camera-password">パスワード:</label>
-        <input type="password" id="camera-password" value="[あなたのパスワード]">
+        <input type="password" id="camera-password" value="">
     </div>
 
     <button onclick="displayImage()">画像を表示</button>
@@ -87,23 +87,27 @@
             const statusMessage = document.getElementById('status-message');
             const imageElement = document.getElementById('camera-image');
 
+            // inputタグからユーザーが入力した値を取得
             const url = document.getElementById('camera-url').value;
             const id = document.getElementById('camera-id').value;
             const password = document.getElementById('camera-password').value;
 
             if (!url || !id || !password) {
-                statusMessage.textContent = 'URL、ID、パスワードをすべて入力してください。';
+                statusMessage.textContent = 'エラー: URL、ID、パスワードをすべて入力してください。';
                 return;
             }
 
-            // カメラの認証情報をプロキシサーバーのクエリパラメータとして送信します
+            // プロキシサーバーへのリクエストURLを構築
             const proxyUrl = `${PROXY_SERVER_URL}/proxy?url=${encodeURIComponent(url)}&id=${encodeURIComponent(id)}&password=${encodeURIComponent(password)}`;
 
             try {
-                // Fetch APIを使用してプロキシサーバーにリクエストを送信
                 const response = await fetch(proxyUrl);
                 
                 if (!response.ok) {
+                    // 401エラーの場合、具体的なメッセージを表示
+                    if (response.status === 401) {
+                         throw new Error(`認証失敗: 401 Unauthorized。IDまたはパスワードが間違っています。`);
+                    }
                     throw new Error(`サーバーエラー: ${response.status} ${response.statusText}`);
                 }
 
@@ -114,7 +118,7 @@
                 statusMessage.textContent = '画像が正常に表示されました。';
             } catch (error) {
                 console.error('画像取得エラー:', error);
-                statusMessage.textContent = '画像の取得に失敗しました。入力情報を確認してください。';
+                statusMessage.textContent = `画像の取得に失敗しました。エラー: ${error.message}`;
                 imageElement.src = '';
             }
         }
