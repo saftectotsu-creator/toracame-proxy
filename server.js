@@ -4,7 +4,7 @@ const cors = require('cors');
 const { URL } = require('url');
 const fetch = require('node-fetch'); 
 // 最終Digest認証ライブラリ
-const AxiosDigestAuth = require('axios-auth-digest').default; // 存在確認済み
+const axiosDigestMiddleware = require('axios-auth-digest-middleware');
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -18,7 +18,7 @@ app.use(express.json());
 // ====================================================================
 app.get('/test-connection', async (req, res) => {
     const { url } = req.query; 
-    // ... (関数の中身は前回のものと同じで、省略します)
+
     if (!url) {
         return res.status(400).send('URLパラメータが必要です。例: ?url=http://szfb263.glddns.com:8080');
     }
@@ -65,23 +65,26 @@ async function attemptBasicAuth(url, id, password) {
     });
 }
 
-// 認証試行関数 2: Digest認証 (axios-auth-digestを使用)
+// 認証試行関数 2: Digest認証 (axios-auth-digest-middlewareを使用)
 async function attemptDigestAuth(url, id, password) {
-    // axios-auth-digestクライアントを初期化
-    const digestAuth = new AxiosDigestAuth({
-        username: id,
-        password: password
-    });
+    // 新しいaxiosインスタンスを作成し、Digest認証ミドルウェアを適用
+    const digestAxios = axios.create();
+    
+    // ミドルウェアを設定
+    digestAxios.interceptors.request.use(
+        axiosDigestMiddleware({
+            username: id,
+            password: password
+        })
+    );
 
     try {
-        // AxiosDigestAuthでGETリクエストを実行
-        const response = await digestAuth.request({
-            method: 'GET', // GETメソッドで実行
-            url: url,
+        // GETリクエストを実行
+        const response = await digestAxios.get(url, {
             responseType: 'arraybuffer',
             headers: {
                 'User-Agent': 'Mozilla/5.0',
-                'Connection': 'close' 
+                'Connection': 'close'
             },
             timeout: 15000,
             validateStatus: (status) => status >= 200 && status < 500
