@@ -30,41 +30,53 @@ async function attemptBasicAuth(url, id, password) {
 async function attemptDigestAuth(url, id, password) {
     // Digestクライアントを初期化
     const digestClient = new DigestFetch(id, password, { 
-        // node-fetchを使うように指定 (Axiosではない)
+        // node-fetchを使うように指定
         fetch: fetch 
     });
 
-    // fetchでリクエストを実行
-    const response = await digestClient.fetch(url, {
-        method: 'GET',
-        headers: {
-            'User-Agent': 'Mozilla/5.0'
-        },
-        timeout: 15000 
-    });
+    try {
+        const response = await digestClient.fetch(url, {
+            method: 'GET',
+            headers: {
+                'User-Agent': 'Mozilla/5.0'
+            },
+            timeout: 15000 
+        });
 
-    // 認証失敗時、次の認証試行へ移行するためにエラーを投げる
-    if (response.status === 401) {
-        throw { response: { status: 401, statusText: response.statusText || 'Unauthorized' } };
-    }
+        // 認証失敗時 (401) の処理
+        if (response.status === 401) {
+            // サーバーがクラッシュしないよう、Axios形式のエラーを明示的にスロー
+            throw { response: { status: 401, statusText: response.statusText || 'Unauthorized' } };
+        }
 
-    if (!response.ok) {
-        // 404, 500などのエラーもAxios形式に変換してreject
+        // 成功時 (200) の処理
+        if (response.ok) {
+            const buffer = await response.arrayBuffer();
+            return {
+                data: Buffer.from(buffer), // Bufferデータ
+                headers: response.headers,
+                status: response.status
+            };
+        }
+        
+        // 認証失敗以外のエラー (404, 500など) の処理
         throw { 
             response: { 
                 status: response.status, 
                 statusText: response.statusText || 'Internal Error'
             } 
         };
+
+    } catch (error) {
+        // 🚨 タイムアウトやネットワークエラーなど、responseオブジェクトを持たないエラーの場合
+        if (!error.response) {
+            // タイムアウトまたはネットワークエラーの場合、次の認証試行へ移行するよう401としてスロー
+            // これで500エラーを回避し、次の認証を試みます
+            throw { response: { status: 401, statusText: 'Network Error or Timeout' } };
+        }
+        // それ以外のAxios形式のエラーはそのままスロー (401を含む)
+        throw error;
     }
-    
-    // 成功した場合 (200)
-    const buffer = await response.arrayBuffer();
-    return {
-        data: Buffer.from(buffer), // Bufferデータ
-        headers: response.headers,
-        status: response.status
-    };
 }
 
 // 認証試行関数 3: URL認証 (ID:PASS@ホスト名)
