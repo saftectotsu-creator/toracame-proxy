@@ -12,6 +12,49 @@ const port = process.env.PORT || 10000;
 app.use(cors());
 app.use(express.json());
 
+
+// ====================================================================
+// 🚨 ネットワーク疎通テスト用エンドポイント
+// ====================================================================
+app.get('/test-connection', async (req, res) => {
+    const { url } = req.query; 
+
+    if (!url) {
+        return res.status(400).send('URLパラメータが必要です。例: ?url=http://szfb263.glddns.com:8080');
+    }
+
+    try {
+        console.log(`ネットワーク疎通テストを開始: ${url}`);
+        
+        // 認証情報を渡さずに、純粋にカメラのベースURLへアクセスを試みる
+        const response = await axios.get(url, {
+            timeout: 10000, 
+            // 認証なしでアクセスした場合、401/403/リダイレクトが返ることを期待
+            maxRedirects: 0, 
+            validateStatus: (status) => status >= 200 && status < 400 || status === 401 || status === 403 
+        });
+
+        // 成功と見なせる応答ステータス（ネットワークは到達可能）
+        if (response.status === 200) {
+             return res.send(`✅ 接続成功 (ステータス: 200 OK)。カメラは匿名アクセスを許可しています。`);
+        } else if (response.status === 401 || response.status === 403) {
+             return res.send(`⚠️ 接続成功 (ステータス: ${response.status} - 認証またはアクセス拒否)。ネットワーク疎通は**問題ありません**。`);
+        }
+
+    } catch (error) {
+        // ネットワークレベルのエラーをキャッチ
+        if (error.code === 'ECONNREFUSED' || error.code === 'EHOSTUNREACH' || error.code === 'ETIMEDOUT') {
+            return res.status(503).send(`❌ 接続失敗: ${error.code}。カメラのポートはRenderから到達できません。**ルーター/ファイアウォール**を確認してください。`);
+        }
+        if (error.response) {
+             return res.send(`⚠️ 接続は確立 (ステータス: ${error.response.status} ${error.response.statusText})。ネットワーク的には問題ありません。`);
+        }
+        return res.status(500).send(`🚨 予期せぬエラー: ${error.message}`);
+    }
+});
+// ====================================================================
+
+
 // 認証試行関数 1: Basic認証 (ヘッダー)
 async function attemptBasicAuth(url, id, password) {
     const authHeader = `Basic ${Buffer.from(`${id}:${password}`).toString('base64')}`;
@@ -28,8 +71,12 @@ async function attemptBasicAuth(url, id, password) {
 
 // 認証試行関数 2: Digest認証 (digest-fetchを使用)
 async function attemptDigestAuth(url, id, password) {
-    // Digestクライアントを初期化
-    const digestClient = new DigestFetch(id, password, { 
+    // ⭐️ Digest認証に使用するIDとパスワードをエンコード
+    const encodedId = encodeURIComponent(id);
+    const encodedPassword = encodeURIComponent(password);
+    
+    // エンコードされた情報でクライアントを初期化
+    const digestClient = new DigestFetch(encodedId, encodedPassword, { 
         fetch: fetch 
     });
 
@@ -46,7 +93,6 @@ async function attemptDigestAuth(url, id, password) {
 
         // 認証失敗時 (401) の処理
         if (response.status === 401) {
-            // サーバーがクラッシュしないよう、Axios形式のエラーを明示的にスロー
             throw { response: { status: 401, statusText: response.statusText || 'Unauthorized' } };
         }
 
@@ -71,10 +117,8 @@ async function attemptDigestAuth(url, id, password) {
     } catch (error) {
         // タイムアウトやネットワークエラー、予期せぬエラーの場合、次の認証へ移行するため401として処理
         if (!error.response && (error.name === 'AbortError' || !error.response)) {
-            // 500クラッシュを防ぐために401としてスロー
             throw { response: { status: 401, statusText: 'Timeout/Network Error' } };
         }
-        // Axios形式のエラーはそのままスロー (401を含む)
         throw error;
     }
 }
@@ -121,37 +165,4 @@ app.get('/proxy', async (req, res) => {
             if (error.response && error.response.status === 401) {
                 console.log('Basic認証失敗 (401)。Digest認証を試行します。');
                 try {
-                    response = await attemptDigestAuth(url, id, password);
-                } catch (error) {
-                    // 3. URL認証 試行
-                    if (error.response && error.response.status === 401) {
-                        console.log('Digest認証失敗 (401)。URL認証を試行します。');
-                        response = await attemptUrlAuth(url, id, password);
-                    } else {
-                         throw error;
-                    }
-                }
-            } else {
-                throw error;
-            }
-        }
-
-        // 成功した場合の処理
-        if (response) {
-            res.set('Content-Type', response.headers['content-type'] || 'image/jpeg');
-            return res.send(Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data));
-        }
-
-    } catch (error) {
-        console.error('プロキシエラー:', error.message);
-        
-        const status = error.response ? error.response.status : 500;
-        const statusText = error.response ? error.response.statusText : 'Internal Server Error';
-        
-        res.status(status).send(`カメラサーバーエラー: ${status} ${statusText}。認証情報またはカメラURLを確認してください。`);
-    }
-});
-
-app.listen(port, () => {
-    console.log(`サーバーがポート ${port} で起動しました。`);
-});
+                    response = await attemptDigestAuth(url, id,
