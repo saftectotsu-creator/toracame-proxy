@@ -2,7 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const { URL } = require('url');
-const DigestAuth = require('axios-digest-auth'); // Digest認証用モジュール
+const DigestAuth = require('axios-digest'); // ⭐️ 正しいDigest認証モジュール
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -26,6 +26,7 @@ async function attemptBasicAuth(url, id, password) {
 
 // 認証試行関数 2: Digest認証
 async function attemptDigestAuth(url, id, password) {
+    // 修正後のDigest認証モジュールを使用
     const digestAuth = new DigestAuth(id, password);
     const authenticatedAxios = digestAuth.axios;
 
@@ -45,7 +46,6 @@ async function attemptUrlAuth(url, id, password) {
     const host = urlObj.host;
     const pathAndQuery = urlObj.pathname + urlObj.search;
     
-    // 認証情報をホスト名に組み込んだ新しいURLを作成
     const newUrl = `${protocol}//${id}:${password}@${host}${pathAndQuery}`;
 
     return axios.get(newUrl, {
@@ -104,7 +104,6 @@ app.get('/proxy', async (req, res) => {
         if (error.response) {
             const status = error.response.status;
             console.error('最終ステータス:', status);
-            // 最終的に401なら、認証情報をクライアントに返す
             res.status(status).send(`カメラサーバーエラー: ${status} ${error.response.statusText}。認証情報を確認してください。`);
         } else if (error.request) {
             res.status(504).send('Gateway Timeout: カメラからの応答なし');
