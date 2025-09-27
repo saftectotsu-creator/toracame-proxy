@@ -74,15 +74,15 @@ async function attemptDigestAuth(url, id, password) {
     });
 
     try {
-        // AxiosDigestでGETリクエストを実行
-        const response = await digestAuth.post(url, {}, { // GETではなくPOSTを試みます (このライブラリの性質上)
+        // AxiosDigestでGETリクエストを実行 (ライブラリの仕様に合わせてPOSTメソッドを使用する可能性があります)
+        const response = await digestAuth.post(url, {}, { 
             responseType: 'arraybuffer',
             headers: {
                 'User-Agent': 'Mozilla/5.0',
                 'Connection': 'close' 
             },
             timeout: 15000,
-            validateStatus: (status) => status >= 200 && status < 500 // 401もキャッチ
+            validateStatus: (status) => status >= 200 && status < 500
         });
 
         // 認証失敗時 (401) の処理
