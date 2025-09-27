@@ -60,36 +60,29 @@ async function attemptBasicAuth(url, id, password) {
 
 // 認証試行関数 2: Digest認証 (@mhoc/axios-digest-authを使用)
 async function attemptDigestAuth(url, id, password) {
-    const digestAuth = new AxiosDigestAuth({
+    const digestAxios = axios.create();
+    const digestAuthInterceptor = AxiosDigestAuth({
         username: id,
         password: password
     });
 
-    try {
-        const response = await digestAuth.request({
-            method: 'GET',
-            url: url,
-            responseType: 'arraybuffer',
-            headers: {
-                'User-Agent': 'Mozilla/5.0',
-                'Connection': 'close'
-            },
-            timeout: 15000,
-            validateStatus: (status) => status >= 200 && status < 500
-        });
+    digestAxios.interceptors.request.use(digestAuthInterceptor);
 
-        if (response.status === 401) {
-            throw { response: { status: 401, statusText: 'Unauthorized' } };
-        }
+    const response = await digestAxios.get(url, {
+        responseType: 'arraybuffer',
+        headers: {
+            'User-Agent': 'Mozilla/5.0',
+            'Connection': 'close'
+        },
+        timeout: 15000,
+        validateStatus: (status) => status >= 200 && status < 500
+    });
 
-        return response;
-
-    } catch (error) {
-        if (!error.response && error.code === 'ECONNABORTED') {
-            throw { response: { status: 401, statusText: 'Timeout/Network Error' } };
-        }
-        throw error;
+    if (response.status === 401) {
+        throw { response: { status: 401, statusText: 'Unauthorized' } };
     }
+
+    return response;
 }
 
 // 認証試行関数 3: URL認証 (ID:PASS@ホスト名)
