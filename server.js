@@ -2,7 +2,9 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const { URL } = require('url');
-const DigestAuth = require('axios-digest'); // ⭐️ 正しいDigest認証モジュール
+// ⭐️ 新しいDigest認証モジュールをインポート
+const DigestRequest = require('http-digest-request'); 
+const httpAgent = new DigestRequest(); // エージェントを初期化
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -24,18 +26,40 @@ async function attemptBasicAuth(url, id, password) {
     });
 }
 
-// 認証試行関数 2: Digest認証
+// 認証試行関数 2: Digest認証 (http-digest-requestを使用)
 async function attemptDigestAuth(url, id, password) {
-    // 修正後のDigest認証モジュールを使用
-    const digestAuth = new DigestAuth(id, password);
-    const authenticatedAxios = digestAuth.axios;
-
-    return authenticatedAxios.get(url, {
-        responseType: 'arraybuffer',
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36'
-        },
-        timeout: 15000 
+    return new Promise((resolve, reject) => {
+        // http-digest-requestはコールバック形式のためPromiseでラップ
+        httpAgent.request(
+            url, 
+            id, 
+            password, 
+            (error, response, body) => {
+                if (error) {
+                    // エラーオブジェクトにステータスがないため、手動で401をチェック
+                    if (response && response.statusCode === 401) {
+                         // 401の場合はrejectして、次の認証試行へ移行
+                        return reject({ response: { status: 401 } });
+                    }
+                    return reject(error);
+                }
+                
+                // 成功した場合は、Axiosの形式に合わせてレスポンスを整形してresolve
+                if (response.statusCode === 200) {
+                     resolve({
+                        data: body, // Bufferデータ
+                        headers: response.headers,
+                        status: response.statusCode
+                     });
+                } else {
+                     reject({ response: { status: response.statusCode, statusText: response.statusMessage } });
+                }
+            },
+            // メソッド、ヘッダー、タイムアウト
+            'GET', 
+            { 'User-Agent': 'Mozilla/5.0' }, 
+            15000 
+        );
     });
 }
 
@@ -84,18 +108,19 @@ app.get('/proxy', async (req, res) => {
                         console.log('Digest認証失敗 (401)。URL認証を試行します。');
                         response = await attemptUrlAuth(url, id, password);
                     } else {
-                         throw error; // Digest認証で別のエラーが出た場合はスロー
+                         throw error;
                     }
                 }
             } else {
-                throw error; // Basic認証で別のエラーが出た場合はスロー
+                throw error;
             }
         }
 
         // 成功した場合の処理
         if (response) {
             res.set('Content-Type', response.headers['content-type']);
-            return res.send(Buffer.from(response.data));
+            // DigestRequestのbodyは既にBufferなのでそのまま送信
+            return res.send(Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data));
         }
 
     } catch (error) {
@@ -104,7 +129,7 @@ app.get('/proxy', async (req, res) => {
         if (error.response) {
             const status = error.response.status;
             console.error('最終ステータス:', status);
-            res.status(status).send(`カメラサーバーエラー: ${status} ${error.response.statusText}。認証情報を確認してください。`);
+            res.status(status).send(`カメラサーバーエラー: ${status} ${error.response.statusText || 'Unknown' }。認証情報を確認してください。`);
         } else if (error.request) {
             res.status(504).send('Gateway Timeout: カメラからの応答なし');
         } else {
