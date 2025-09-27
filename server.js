@@ -165,4 +165,37 @@ app.get('/proxy', async (req, res) => {
             if (error.response && error.response.status === 401) {
                 console.log('Basic認証失敗 (401)。Digest認証を試行します。');
                 try {
-                    response = await attemptDigestAuth(url, id,
+                    response = await attemptDigestAuth(url, id, password);
+                } catch (error) {
+                    // 3. URL認証 試行
+                    if (error.response && error.response.status === 401) {
+                        console.log('Digest認証失敗 (401)。URL認証を試行します。');
+                        response = await attemptUrlAuth(url, id, password);
+                    } else {
+                         throw error;
+                    }
+                }
+            } else {
+                throw error;
+            }
+        }
+
+        // 成功した場合の処理
+        if (response) {
+            res.set('Content-Type', response.headers['content-type'] || 'image/jpeg');
+            return res.send(Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data));
+        }
+
+    } catch (error) {
+        console.error('プロキシエラー:', error.message);
+        
+        const status = error.response ? error.response.status : 500;
+        const statusText = error.response ? error.response.statusText : 'Internal Server Error';
+        
+        res.status(status).send(`カメラサーバーエラー: ${status} ${statusText}。認証情報またはカメラURLを確認してください。`);
+    }
+});
+
+app.listen(port, () => {
+    console.log(`サーバーがポート ${port} で起動しました。`);
+});
