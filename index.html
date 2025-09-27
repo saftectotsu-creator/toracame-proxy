@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>カメラ監視ビューア (プロキシ接続対応)</title>
+    <!-- Tailwind CSS をロード -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         .image-container {
@@ -27,11 +28,13 @@
     <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
         <h1 class="text-3xl font-extrabold text-gray-800 mb-6">カメラライブビューア</h1>
 
+        <!-- CSV フォーマット説明エリア -->
         <div class="bg-white p-4 border border-gray-200 rounded-xl shadow-md mb-6">
             <p class="text-sm font-semibold text-gray-700 mb-2">CSVフォーマット: **URL**,"**カメラ名**","**ID**","**PASS**"</p>
             <p class="text-xs text-gray-500">例: http://192.168.1.1/cgi/Entrance.user,pass123,Entrance,user,pass123</p>
         </div>
 
+        <!-- コントロールパネル -->
         <div class="flex flex-wrap items-center space-y-4 md:space-y-0 md:space-x-4 mb-8">
             <input type="file" id="csvFile" accept=".csv" class="hidden" onchange="displayFileName(this)">
             
@@ -56,12 +59,15 @@
             </div>
         </div>
 
+        <!-- 取得結果ステータス -->
         <div class="mb-6">
             <span id="fetchStatus" class="text-lg font-semibold text-gray-700">取得完了。成功: 0件 / 全体: 0件</span>
         </div>
 
+        <!-- カメラグリッド -->
         <div id="cameraGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            </div>
+            <!-- カメラカードがここに動的に挿入されます -->
+        </div>
 
     </div>
 
@@ -115,7 +121,7 @@
                 document.getElementById('cameraCount').textContent = `カメラ ${cameras.length}台を登録しました`;
                 renderCameras();
             };
-            // 💡 日本語のCSVファイルを想定し、Shift_JISで読み込み
+            // 日本語のCSVファイルを想定し、Shift_JISで読み込み
             reader.readAsText(file, 'Shift_JIS'); 
         }
 
@@ -151,7 +157,7 @@
         }
 
         // ==============================================
-        // 💡 最終版: 画像取得とリトライロジック (データサイズチェック機能付き)
+        // 最終版: 画像取得とリトライロジック (MIME強制 & データサイズチェック機能付き)
         // ==============================================
         async function fetchSingleImage(camera, index) {
             const statusElement = document.getElementById(`status-${index}`);
@@ -176,9 +182,12 @@
                     const response = await fetch(proxyUrl);
 
                     if (response.ok) {
-                        const blob = await response.blob();
+                        const buffer = await response.arrayBuffer();
                         
-                        // 💡 修正点: 画像データが小さすぎる場合、不完全と見なしてリトライ
+                        // 💡 最終修正点: Blobを作成する際に Content-Type を強制的に 'image/jpeg' に設定する
+                        const blob = new Blob([buffer], { type: 'image/jpeg' });
+                        
+                        // データのサイズチェック
                         if (blob.size < MIN_IMAGE_SIZE) {
                             lastError = `画像データが小さすぎます (${blob.size} bytes)。`;
                             console.warn(`カメラ ${index + 1}: ${lastError} リトライ実行`);
@@ -190,7 +199,7 @@
                             }
                         }
 
-                        // 成功した場合、Blobとして取得し、URLを作成して表示
+                        // 成功した場合、URLを作成して表示
                         const imageUrl = URL.createObjectURL(blob);
                         
                         imageElement.src = imageUrl;
