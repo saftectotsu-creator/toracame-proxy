@@ -30,7 +30,6 @@ async function attemptBasicAuth(url, id, password) {
 async function attemptDigestAuth(url, id, password) {
     // Digestクライアントを初期化
     const digestClient = new DigestFetch(id, password, { 
-        // node-fetchを使うように指定
         fetch: fetch 
     });
 
@@ -69,12 +68,15 @@ async function attemptDigestAuth(url, id, password) {
 
     } catch (error) {
         // 🚨 タイムアウトやネットワークエラーなど、responseオブジェクトを持たないエラーの場合
-        if (!error.response) {
-            // タイムアウトまたはネットワークエラーの場合、次の認証試行へ移行するよう401としてスロー
-            // これで500エラーを回避し、次の認証を試みます
-            throw { response: { status: 401, statusText: 'Network Error or Timeout' } };
+        if (!error.response && error.name === 'AbortError') {
+             // fetchのタイムアウトエラーはAbortErrorとして処理し、次の認証へ移行するため401としてスロー
+            throw { response: { status: 401, statusText: 'Timeout/Network Error' } };
         }
-        // それ以外のAxios形式のエラーはそのままスロー (401を含む)
+        if (!error.response) {
+            // 予期せぬエラーの場合も、次の認証試行へ移行するよう401としてスロー
+            throw { response: { status: 401, statusText: 'Unexpected Digest Error' } };
+        }
+        // Axios形式のエラーはそのままスロー (401を含む)
         throw error;
     }
 }
@@ -151,4 +153,3 @@ app.get('/proxy', async (req, res) => {
 app.listen(port, () => {
     console.log(`サーバーがポート ${port} で起動しました。`);
 });
-// TEMPORARY CHANGE TO FORCE GIT COMMIT
