@@ -2,8 +2,8 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const { URL } = require('url');
-// .default の有無は重要ではないため、安全のため削除
-const AxiosDigestAuth = require('@mhoc/axios-digest-auth'); // 👈 インポート修正（シンプルに戻す）
+// 🚨 最終修正: シンプルにインポートし、関数として呼び出す
+const AxiosDigestAuth = require('@mhoc/axios-digest-auth');
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -70,14 +70,17 @@ async function attemptDigestAuth(url, id, password) {
     // 新しいaxiosインスタンスを作成
     const digestAxios = axios.create(); 
 
-    // ✅ 修正済み: Classとしてnewキーワードを使ってインスタンス化する
-    const digestAuthInterceptor = new AxiosDigestAuth({ 
+    // 🚨 修正済み: ライブラリを直接ファクトリ関数として呼び出し、インターセプター関数を取得する
+    // この方法が、ライブラリのドキュメントに基づく唯一の正しい呼び出し方です。
+    const digestAuthInterceptor = AxiosDigestAuth({ 
         username: id,
         password: password
     });
 
     // インターセプターを適用
-    digestAxios.interceptors.request.use(digestAuthInterceptor.requestInterceptor);
+    // このライブラリは、返された関数自体がインターセプターのロジックを持つため、
+    // requestInterceptorプロパティは不要です。
+    digestAxios.interceptors.request.use(digestAuthInterceptor);
 
     try {
         // インターセプターを適用したaxiosインスタンスでGETリクエストを実行
