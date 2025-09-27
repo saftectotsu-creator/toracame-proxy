@@ -17,6 +17,6 @@
     "axios": "^1.6.8",
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "node-http-digest": "^1.1.2" 
+    "node-fetch-digest": "^1.0.0" 
   }
 }
