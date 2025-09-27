@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>カメラ監視ビューア (プロキシ接続対応)</title>
-    <!-- Tailwind CSS をロード -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         .image-container {
@@ -28,13 +27,11 @@
     <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
         <h1 class="text-3xl font-extrabold text-gray-800 mb-6">カメラライブビューア</h1>
 
-        <!-- CSV フォーマット説明エリア -->
         <div class="bg-white p-4 border border-gray-200 rounded-xl shadow-md mb-6">
             <p class="text-sm font-semibold text-gray-700 mb-2">CSVフォーマット: **URL**,"**カメラ名**","**ID**","**PASS**"</p>
             <p class="text-xs text-gray-500">例: http://192.168.1.1/cgi/Entrance.user,pass123,Entrance,user,pass123</p>
         </div>
 
-        <!-- コントロールパネル -->
         <div class="flex flex-wrap items-center space-y-4 md:space-y-0 md:space-x-4 mb-8">
             <input type="file" id="csvFile" accept=".csv" class="hidden" onchange="displayFileName(this)">
             
@@ -59,15 +56,12 @@
             </div>
         </div>
 
-        <!-- 取得結果ステータス -->
         <div class="mb-6">
             <span id="fetchStatus" class="text-lg font-semibold text-gray-700">取得完了。成功: 0件 / 全体: 0件</span>
         </div>
 
-        <!-- カメラグリッド -->
         <div id="cameraGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <!-- カメラカードがここに動的に挿入されます -->
-        </div>
+            </div>
 
     </div>
 
@@ -121,7 +115,8 @@
                 document.getElementById('cameraCount').textContent = `カメラ ${cameras.length}台を登録しました`;
                 renderCameras();
             };
-            reader.readAsText(file, 'Shift_JIS'); // 日本語CSV対応のためShift_JISで試行
+            // 💡 日本語のCSVファイルを想定し、Shift_JISで読み込み
+            reader.readAsText(file, 'Shift_JIS'); 
         }
 
         // ==============================================
@@ -156,8 +151,7 @@
         }
 
         // ==============================================
-        // 💡 最終修正版: 画像取得とリトライロジック
-        // サーバーからの切断/エラーに対応するため、クライアント側でリトライします
+        // 💡 最終版: 画像取得とリトライロジック (データサイズチェック機能付き)
         // ==============================================
         async function fetchSingleImage(camera, index) {
             const statusElement = document.getElementById(`status-${index}`);
@@ -170,27 +164,42 @@
 
             const MAX_RETRIES = 3;
             const RETRY_DELAY_MS = 1500; // 1.5秒待機
+            const MIN_IMAGE_SIZE = 500; // 500バイト未満は不完全な画像データと見なす
             let lastError = null;
 
             for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                 try {
-                    // プロキシURLを構築
-                    const proxyUrl = `${PROXY_BASE_URL}?url=${encodeURIComponent(camera.url)}&id=${encodeURIComponent(camera.id)}&password=${encodeURIComponent(camera.password)}`;
+                    // キャッシュを強制的に無効化するためにランダムなパラメータを追加
+                    const cacheBuster = `&_ts=${Date.now()}`;
+                    const proxyUrl = `${PROXY_BASE_URL}?url=${encodeURIComponent(camera.url)}&id=${encodeURIComponent(camera.id)}&password=${encodeURIComponent(camera.password)}${cacheBuster}`;
                     
                     const response = await fetch(proxyUrl);
 
                     if (response.ok) {
-                        // 成功した場合、Blobとして取得し、URLを作成して表示
                         const blob = await response.blob();
+                        
+                        // 💡 修正点: 画像データが小さすぎる場合、不完全と見なしてリトライ
+                        if (blob.size < MIN_IMAGE_SIZE) {
+                            lastError = `画像データが小さすぎます (${blob.size} bytes)。`;
+                            console.warn(`カメラ ${index + 1}: ${lastError} リトライ実行`);
+                            
+                            if (attempt < MAX_RETRIES) {
+                                statusElement.textContent = `不完全データ。リトライ中 (${attempt}/${MAX_RETRIES})...`;
+                                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+                                continue; // 次のループへ
+                            }
+                        }
+
+                        // 成功した場合、Blobとして取得し、URLを作成して表示
                         const imageUrl = URL.createObjectURL(blob);
                         
                         imageElement.src = imageUrl;
                         statusElement.textContent = 'OK';
                         statusElement.className = 'mt-3 text-center font-bold text-green-600';
-                        console.log(`カメラ ${index + 1}: 取得成功 (試行 ${attempt}回目)`);
+                        console.log(`カメラ ${index + 1}: 取得成功 (試行 ${attempt}回目), サイズ: ${blob.size} bytes`);
                         return { success: true, camera: camera.name };
                     } else {
-                        // 認証失敗 (401) やサーバーエラー (500) はエラーとして扱う
+                        // サーバーエラー (401, 500など) の処理
                         const errorText = await response.text();
                         lastError = `サーバーエラー: ${response.status} ${response.statusText} (${errorText.substring(0, 50)}...)`;
                         console.error(`カメラ ${index + 1}: 取得失敗 (試行 ${attempt}回目): ${lastError}`);
@@ -246,10 +255,9 @@
             refreshButton.textContent = '全ての画像を再取得';
         }
 
-        // ページロード時の初期ダミーデータ（テスト用）
+        // ページロード時の初期化
         window.onload = () => {
-             // 実際のCSVファイルを選択/読み込みするまで、ダミーデータは使用しません。
-             // ユーザーがCSVをアップロードすることでカメラデータがセットされます。
+             // 特に初期設定はなし。ユーザーがCSVをアップロードするのを待つ
         };
     </script>
 </body>
