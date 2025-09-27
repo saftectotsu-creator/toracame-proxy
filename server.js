@@ -3,25 +3,18 @@ const axios = require('axios');
 const cors = require('cors');
 const { URL } = require('url');
 
-// 💡 Digest認証ライブラリは残しますが、使用順序を下げます
+// Digest認証ライブラリ
 const AxiosDigestAuth = require('@mhoc/axios-digest-auth').default; 
 
 const app = express();
 const port = process.env.PORT || 10000;
 
+// CORSミドルウェアを全体に適用
 app.use(cors());
 app.use(express.json());
 
 // ====================================================================
-// ネットワーク疎通テスト用エンドポイント (省略)
-// ====================================================================
-app.get('/test-connection', async (req, res) => {
-    // ... (テストコードは省略)
-});
-
-
-// ====================================================================
-// 認証試行関数群
+// 認証試行関数群 (変更なし)
 // ====================================================================
 
 // 1. Basic認証 (ヘッダー)
@@ -80,11 +73,14 @@ app.get('/proxy', async (req, res) => {
     if (!url) {
         return res.status(400).send('URL is required.');
     }
+    
+    // 💡 修正点 1: CORSヘッダーを可能な限り早期に設定
+    res.set('Access-Control-Allow-Origin', '*'); 
 
     try {
         let response;
-        
-        // 認証なしアクセス
+
+        // 認証ロジック (Basic → URL → Digest の順序は維持)
         if (!id || !password) {
             console.log('匿名アクセスを試行');
             response = await axios.get(url, {
@@ -93,25 +89,21 @@ app.get('/proxy', async (req, res) => {
                 timeout: 15000
             });
         } else {
-            // 💡 認証順序変更: Basic → URL認証 (テスト成功済み) → Digest認証 (バグ回避)
             try {
                 console.log('認証試行 1: Basic認証');
                 response = await attemptBasicAuth(url, id, password);
             } catch (error) {
                 if (error.response && error.response.status === 401) {
                     
-                    // --- 優先度 2: URL埋め込み認証 (テストで成功したため優先) ---
                     console.log('Basic失敗 → URL認証へ (強制フォールバック)');
                     try {
                         response = await attemptUrlAuth(url, id, password);
                     } catch (err2) {
                         if (err2.response && err2.response.status === 401) {
                             
-                            // --- 優先度 3: Digest認証 (最終手段として残す) ---
                             console.log('URL認証失敗 → Digest認証へ');
                             response = await attemptDigestAuth(url, id, password);
                         } else {
-                            // URL認証中のネットワークエラー
                             throw err2;
                         }
                     }
@@ -122,10 +114,12 @@ app.get('/proxy', async (req, res) => {
         }
 
         if (response) {
-            res.set('Content-Type', response.headers['content-type'] || 'image/jpeg');
-            res.set('Access-Control-Allow-Origin', '*'); 
-            // 💡 認証成功ログを出力
+            // 💡 修正点 2: Content-Typeを image/jpeg に強制
+            // これにより、カメラが不完全なヘッダーを返してもブラウザが正しく解釈できる
+            res.set('Content-Type', 'image/jpeg');
+            
             console.log('✅ 認証成功。画像データをクライアントに送信します。');
+            // 画像データをクライアントに送信
             return res.send(Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data));
         }
     } catch (error) {
@@ -134,6 +128,7 @@ app.get('/proxy', async (req, res) => {
         const status = error.response ? error.response.status : 500;
         const statusText = error.response ? error.response.statusText : 'Internal Server Error';
         
+        // エラー時もCORSを設定
         res.set('Access-Control-Allow-Origin', '*');
         res.status(status).send(`カメラサーバーエラー: ${status} ${statusText}。詳細: ${error.message}`);
     }
