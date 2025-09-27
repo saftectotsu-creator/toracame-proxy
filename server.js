@@ -2,7 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const { URL } = require('url');
-// ⭐️ 確実に存在するDigest認証モジュールを使用
+// 確実に存在するDigest認証モジュールを使用
 const fetch = require('node-fetch');
 const DigestFetch = require('digest-fetch'); 
 
@@ -37,7 +37,9 @@ async function attemptDigestAuth(url, id, password) {
         const response = await digestClient.fetch(url, {
             method: 'GET',
             headers: {
-                'User-Agent': 'Mozilla/5.0'
+                'User-Agent': 'Mozilla/5.0',
+                // ⭐️ Axis互換性のためConnection: closeを追加
+                'Connection': 'close' 
             },
             timeout: 15000 
         });
@@ -88,7 +90,11 @@ async function attemptUrlAuth(url, id, password) {
     const host = urlObj.host;
     const pathAndQuery = urlObj.pathname + urlObj.search;
     
-    const newUrl = `${protocol}//${id}:${password}@${host}${pathAndQuery}`;
+    // ⭐️ IDとパスワードを強制的にURIエンコードする
+    const encodedId = encodeURIComponent(id);
+    const encodedPassword = encodeURIComponent(password);
+
+    const newUrl = `${protocol}//${encodedId}:${encodedPassword}@${host}${pathAndQuery}`;
 
     return axios.get(newUrl, {
         responseType: 'arraybuffer',
