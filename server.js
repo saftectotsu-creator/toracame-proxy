@@ -14,7 +14,7 @@ app.use(express.json());
 
 
 // ====================================================================
-// ネットワーク疎通テスト用エンドポイント (変更なし)
+// ネットワーク疎通テスト用エンドポイント
 // ====================================================================
 app.get('/test-connection', async (req, res) => {
     const { url } = req.query; 
@@ -68,17 +68,20 @@ async function attemptBasicAuth(url, id, password) {
 // 認証試行関数 2: Digest認証 (@mhoc/axios-digest-authを使用)
 async function attemptDigestAuth(url, id, password) {
     
-    // axiosインスタンスを認証情報で作成
-    const authAxios = AxiosDigestAuth.create({
-        auth: {
+    // 既存のaxiosインスタンスではなく、新しいaxiosインスタンスを作成
+    const digestAxios = axios.create(); 
+
+    // ✅ 修正済み: Axiosインターセプターとして認証ロジックを適用
+    digestAxios.interceptors.request.use(
+        AxiosDigestAuth({
             username: id,
             password: password
-        }
-    });
+        })
+    );
 
     try {
-        // GETリクエストを実行
-        const response = await authAxios.get(url, {
+        // インターセプターを適用したaxiosインスタンスでGETリクエストを実行
+        const response = await digestAxios.get(url, {
             responseType: 'arraybuffer',
             headers: {
                 'User-Agent': 'Mozilla/5.0',
