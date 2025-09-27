@@ -3,121 +3,254 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>カメラ画像ビューア</title>
+    <title>カメラ監視ビューア (プロキシ接続対応)</title>
+    <!-- Tailwind CSS をロード -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body {
-            font-family: sans-serif;
+        .image-container {
+            width: 100%;
+            height: 180px; /* 画像の縦横比を考慮した固定高さ */
             display: flex;
-            flex-direction: column;
+            justify-content: center;
             align-items: center;
-            padding: 20px;
+            background-color: #f3f4f6;
+            border-radius: 8px;
+            overflow: hidden;
         }
-        .input-group {
-            margin-bottom: 15px;
+        .camera-image {
             width: 100%;
-            max-width: 600px;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        input {
-            width: 100%;
-            padding: 8px;
-            box-sizing: border-box;
-        }
-        button {
-            padding: 10px 20px;
-            cursor: pointer;
-            border: none;
-            background-color: #007bff;
-            color: white;
-            border-radius: 5px;
-            font-size: 16px;
-        }
-        #image-container {
-            margin-top: 20px;
-            text-align: center;
-        }
-        #image-container img {
-            max-width: 100%;
-            height: auto;
-            border: 1px solid #ddd;
-        }
-        .status-message {
-            margin-top: 10px;
-            color: red;
-            font-weight: bold;
+            height: 100%;
+            object-fit: contain; /* 画像全体を表示し、枠に合わせる */
         }
     </style>
 </head>
-<body>
+<body class="bg-gray-100 font-sans">
+    <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        <h1 class="text-3xl font-extrabold text-gray-800 mb-6">カメラライブビューア</h1>
 
-    <h1>カメラ画像ビューア</h1>
+        <!-- CSV フォーマット説明エリア -->
+        <div class="bg-white p-4 border border-gray-200 rounded-xl shadow-md mb-6">
+            <p class="text-sm font-semibold text-gray-700 mb-2">CSVフォーマット: **URL**,"**カメラ名**","**ID**","**PASS**"</p>
+            <p class="text-xs text-gray-500">例: http://192.168.1.1/cgi/Entrance.user,pass123,Entrance,user,pass123</p>
+        </div>
 
-    <div class="input-group">
-        <label for="camera-url">カメラURL:</label>
-        <input type="text" id="camera-url" value="http://kozou125.moonlight.warplink.ne.jp:8080/axis-cgi/jpg/image.cgi?resolution=320x240&compression=25&camera=1">
+        <!-- コントロールパネル -->
+        <div class="flex flex-wrap items-center space-y-4 md:space-y-0 md:space-x-4 mb-8">
+            <input type="file" id="csvFile" accept=".csv" class="hidden" onchange="displayFileName(this)">
+            
+            <button onclick="document.getElementById('csvFile').click()" class="px-4 py-2 bg-gray-500 text-white font-semibold rounded-lg hover:bg-gray-600 transition duration-150 shadow-md">
+                ファイルを選択
+                <span id="fileNameDisplay" class="ml-2 text-sm text-gray-200">未選択</span>
+            </button>
+            
+            <button onclick="handleCsvUpload()" class="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition duration-150 shadow-md">
+                CSVを読み込む
+            </button>
+            
+            <span id="cameraCount" class="text-lg font-bold text-orange-600 ml-4">カメラ 0台を登録しました</span>
+
+            <div class="flex space-x-2 ml-auto">
+                <button id="refreshButton" onclick="fetchImages()" class="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md">
+                    全ての画像を再取得
+                </button>
+                <button onclick="alert('PDF保存機能は未実装です。')" class="px-6 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition duration-150 shadow-md">
+                    PDFとして保存
+                </button>
+            </div>
+        </div>
+
+        <!-- 取得結果ステータス -->
+        <div class="mb-6">
+            <span id="fetchStatus" class="text-lg font-semibold text-gray-700">取得完了。成功: 0件 / 全体: 0件</span>
+        </div>
+
+        <!-- カメラグリッド -->
+        <div id="cameraGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <!-- カメラカードがここに動的に挿入されます -->
+        </div>
+
     </div>
-
-    <div class="input-group">
-        <label for="camera-id">ID:</label>
-        <input type="text" id="camera-id" value="[あなたのID]">
-    </div>
-
-    <div class="input-group">
-        <label for="camera-password">パスワード:</label>
-        <input type="password" id="camera-password" value="[あなたのパスワード]">
-    </div>
-
-    <button onclick="displayImage()">画像を表示</button>
-
-    <div id="image-container">
-        <img id="camera-image" src="" alt="カメラ画像">
-    </div>
-
-    <div class="status-message" id="status-message"></div>
 
     <script>
-        // RenderにデプロイされたプロキシサーバーのURL
-        const PROXY_SERVER_URL = "https://toracame-proxy.onrender.com"; 
+        let cameras = [];
+        const PROXY_BASE_URL = 'https://toracame-proxy.onrender.com/proxy'; 
 
-        async function displayImage() {
-            const statusMessage = document.getElementById('status-message');
-            const imageElement = document.getElementById('camera-image');
+        // ==============================================
+        // CSV 処理ロジック
+        // ==============================================
 
-            const url = document.getElementById('camera-url').value;
-            const id = document.getElementById('camera-id').value;
-            const password = document.getElementById('camera-password').value;
+        function displayFileName(input) {
+            const display = document.getElementById('fileNameDisplay');
+            display.textContent = input.files[0] ? input.files[0].name : '未選択';
+        }
 
-            if (!url || !id || !password) {
-                statusMessage.textContent = 'URL、ID、パスワードをすべて入力してください。';
+        function parseCSV(text) {
+            const lines = text.trim().split('\n');
+            if (lines.length < 2) return [];
+
+            const result = [];
+            // ヘッダー行をスキップし、データ行から処理
+            for (let i = 1; i < lines.length; i++) {
+                const parts = lines[i].split(',');
+                // CSVフォーマット: URL,カメラ名,ID,PASS
+                if (parts.length >= 4) {
+                    result.push({
+                        url: parts[0].trim(),
+                        name: parts[1].trim(),
+                        id: parts[2].trim(),
+                        password: parts[3].trim(),
+                    });
+                }
+            }
+            return result;
+        }
+
+        function handleCsvUpload() {
+            const fileInput = document.getElementById('csvFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('CSVファイルを選択してください。');
                 return;
             }
 
-            // カメラの認証情報をプロキシサーバーのクエリパラメータとして送信します
-            const proxyUrl = `${PROXY_SERVER_URL}/proxy?url=${encodeURIComponent(url)}&id=${encodeURIComponent(id)}&password=${encodeURIComponent(password)}`;
-
-            try {
-                // Fetch APIを使用してプロキシサーバーにリクエストを送信
-                const response = await fetch(proxyUrl);
-                
-                if (!response.ok) {
-                    throw new Error(`サーバーエラー: ${response.status} ${response.statusText}`);
-                }
-
-                const blob = await response.blob();
-                const objectURL = URL.createObjectURL(blob);
-                
-                imageElement.src = objectURL;
-                statusMessage.textContent = '画像が正常に表示されました。';
-            } catch (error) {
-                console.error('画像取得エラー:', error);
-                statusMessage.textContent = '画像の取得に失敗しました。入力情報を確認してください。';
-                imageElement.src = '';
-            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const csvText = e.target.result;
+                cameras = parseCSV(csvText);
+                document.getElementById('cameraCount').textContent = `カメラ ${cameras.length}台を登録しました`;
+                renderCameras();
+            };
+            reader.readAsText(file, 'Shift_JIS'); // 日本語CSV対応のためShift_JISで試行
         }
+
+        // ==============================================
+        // UI レンダリングロジック
+        // ==============================================
+
+        function renderCameras() {
+            const grid = document.getElementById('cameraGrid');
+            grid.innerHTML = ''; // カメラグリッドをクリア
+
+            if (cameras.length === 0) {
+                grid.innerHTML = '<p class="text-gray-500 col-span-4">CSVを読み込んでカメラを登録してください。</p>';
+                document.getElementById('fetchStatus').textContent = '取得完了。成功: 0件 / 全体: 0件';
+                return;
+            }
+
+            cameras.forEach((camera, index) => {
+                const cameraCard = document.createElement('div');
+                cameraCard.className = 'bg-white shadow-lg rounded-xl p-4 transition duration-200 hover:shadow-xl';
+                cameraCard.innerHTML = `
+                    <h3 class="text-lg font-semibold text-gray-800 mb-2">${index + 1}. ${camera.name}</h3>
+                    <div class="image-container">
+                        <img id="image-${index}" class="camera-image" src="https://placehold.co/100x100/eeeeee/000000?text=未取得" alt="${camera.name}画像">
+                    </div>
+                    <p id="status-${index}" class="mt-3 text-center font-bold text-gray-500">未取得</p>
+                `;
+                grid.appendChild(cameraCard);
+            });
+
+            // ロード後、すぐに画像取得を開始
+            fetchImages();
+        }
+
+        // ==============================================
+        // 💡 最終修正版: 画像取得とリトライロジック
+        // サーバーからの切断/エラーに対応するため、クライアント側でリトライします
+        // ==============================================
+        async function fetchSingleImage(camera, index) {
+            const statusElement = document.getElementById(`status-${index}`);
+            const imageElement = document.getElementById(`image-${index}`);
+            
+            // UIをリセット
+            statusElement.textContent = '取得中...';
+            statusElement.className = 'mt-3 text-center font-bold text-gray-500';
+            imageElement.src = 'https://placehold.co/100x100/eeeeee/000000?text=Loading';
+
+            const MAX_RETRIES = 3;
+            const RETRY_DELAY_MS = 1500; // 1.5秒待機
+            let lastError = null;
+
+            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                try {
+                    // プロキシURLを構築
+                    const proxyUrl = `${PROXY_BASE_URL}?url=${encodeURIComponent(camera.url)}&id=${encodeURIComponent(camera.id)}&password=${encodeURIComponent(camera.password)}`;
+                    
+                    const response = await fetch(proxyUrl);
+
+                    if (response.ok) {
+                        // 成功した場合、Blobとして取得し、URLを作成して表示
+                        const blob = await response.blob();
+                        const imageUrl = URL.createObjectURL(blob);
+                        
+                        imageElement.src = imageUrl;
+                        statusElement.textContent = 'OK';
+                        statusElement.className = 'mt-3 text-center font-bold text-green-600';
+                        console.log(`カメラ ${index + 1}: 取得成功 (試行 ${attempt}回目)`);
+                        return { success: true, camera: camera.name };
+                    } else {
+                        // 認証失敗 (401) やサーバーエラー (500) はエラーとして扱う
+                        const errorText = await response.text();
+                        lastError = `サーバーエラー: ${response.status} ${response.statusText} (${errorText.substring(0, 50)}...)`;
+                        console.error(`カメラ ${index + 1}: 取得失敗 (試行 ${attempt}回目): ${lastError}`);
+                        
+                        if (attempt < MAX_RETRIES) {
+                            statusElement.textContent = `リトライ中 (${attempt}/${MAX_RETRIES})...`;
+                            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+                        }
+                    }
+                } catch (error) {
+                    // ネットワークエラー (Failed to fetch, net::ERR_FAILED) の処理
+                    lastError = `ネットワークエラー: ${error.message}`;
+                    console.error(`カメラ ${index + 1}: ネットワーク失敗 (試行 ${attempt}回目):`, error);
+
+                    if (attempt < MAX_RETRIES) {
+                        statusElement.textContent = `リトライ中 (${attempt}/${MAX_RETRIES})...`;
+                        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+                    }
+                }
+            }
+
+            // 全てのリトライが失敗した場合
+            statusElement.textContent = `エラー: ${lastError}`;
+            statusElement.className = 'mt-3 text-center font-bold text-red-600';
+            imageElement.src = 'https://placehold.co/100x100/ffbbbb/800000?text=エラー';
+            console.error(`カメラ ${index + 1}: 最終取得失敗`);
+            return { success: false, camera: camera.name };
+        }
+
+        async function fetchImages() {
+            if (cameras.length === 0) {
+                alert('カメラが登録されていません。CSVを読み込んでください。');
+                return;
+            }
+
+            const refreshButton = document.getElementById('refreshButton');
+            refreshButton.disabled = true;
+            refreshButton.textContent = '取得処理中...';
+
+            const promises = cameras.map((camera, index) => fetchSingleImage(camera, index));
+            const results = await Promise.allSettled(promises);
+
+            let successCount = 0;
+            results.forEach(result => {
+                if (result.status === 'fulfilled' && result.value.success) {
+                    successCount++;
+                }
+            });
+
+            document.getElementById('fetchStatus').textContent = `取得完了。成功: ${successCount}件 / 全体: ${cameras.length}件`;
+
+            refreshButton.disabled = false;
+            refreshButton.textContent = '全ての画像を再取得';
+        }
+
+        // ページロード時の初期ダミーデータ（テスト用）
+        window.onload = () => {
+             // 実際のCSVファイルを選択/読み込みするまで、ダミーデータは使用しません。
+             // ユーザーがCSVをアップロードすることでカメラデータがセットされます。
+        };
     </script>
 </body>
 </html>
