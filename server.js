@@ -2,8 +2,8 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const { URL } = require('url');
-// 🚨 修正済み: .default プロパティを使用して、関数を正しくインポートします
-const AxiosDigestAuth = require('@mhoc/axios-digest-auth').default; // 👈 修正箇所
+// .default の有無は重要ではないため、安全のため削除
+const AxiosDigestAuth = require('@mhoc/axios-digest-auth'); // 👈 インポート修正（シンプルに戻す）
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -13,7 +13,7 @@ app.use(express.json());
 
 
 // ====================================================================
-// ネットワーク疎通テスト用エンドポイント
+// ネットワーク疎通テスト用エンドポイント (変更なし)
 // ====================================================================
 app.get('/test-connection', async (req, res) => {
     const { url } = req.query; 
@@ -70,13 +70,14 @@ async function attemptDigestAuth(url, id, password) {
     // 新しいaxiosインスタンスを作成
     const digestAxios = axios.create(); 
 
-    // Axiosインターセプターとして認証ロジックを適用
-    digestAxios.interceptors.request.use(
-        AxiosDigestAuth({ // 👈 AxiosDigestAuthが関数として正しくインポートされたことを期待
-            username: id,
-            password: password
-        })
-    );
+    // ✅ 修正済み: Classとしてnewキーワードを使ってインスタンス化する
+    const digestAuthInterceptor = new AxiosDigestAuth({ 
+        username: id,
+        password: password
+    });
+
+    // インターセプターを適用
+    digestAxios.interceptors.request.use(digestAuthInterceptor.requestInterceptor);
 
     try {
         // インターセプターを適用したaxiosインスタンスでGETリクエストを実行
