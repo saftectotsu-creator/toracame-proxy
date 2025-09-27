@@ -29,7 +29,6 @@ app.get('/test-connection', async (req, res) => {
         // 認証情報を渡さずに、純粋にカメラのベースURLへアクセスを試みる
         const response = await axios.get(url, {
             timeout: 10000, 
-            // 認証なしでアクセスした場合、401/403/リダイレクトが返ることを期待
             maxRedirects: 0, 
             validateStatus: (status) => status >= 200 && status < 400 || status === 401 || status === 403 
         });
@@ -71,7 +70,7 @@ async function attemptBasicAuth(url, id, password) {
 
 // 認証試行関数 2: Digest認証 (digest-fetchを使用)
 async function attemptDigestAuth(url, id, password) {
-    // ⭐️ Digest認証に使用するIDとパスワードをエンコード
+    // Digest認証に使用するIDとパスワードをエンコード
     const encodedId = encodeURIComponent(id);
     const encodedPassword = encodeURIComponent(password);
     
@@ -149,39 +148,56 @@ async function attemptUrlAuth(url, id, password) {
 app.get('/proxy', async (req, res) => {
     const { url, id, password } = req.query;
 
-    if (!url || !id || !password) {
-        return res.status(400).send('URL, ID, and password are required.');
+    if (!url) {
+        return res.status(400).send('URL is required.'); // URLのみ必須に変更
     }
 
     try {
         let response;
         
-        // 1. Basic認証 (ヘッダー) 試行
-        try {
-            console.log('認証試行 1: Basic認証 (ヘッダー)');
-            response = await attemptBasicAuth(url, id, password);
-        } catch (error) {
-            // 2. Digest認証 試行
-            if (error.response && error.response.status === 401) {
-                console.log('Basic認証失敗 (401)。Digest認証を試行します。');
-                try {
-                    response = await attemptDigestAuth(url, id, password);
-                } catch (error) {
-                    // 3. URL認証 試行
-                    if (error.response && error.response.status === 401) {
-                        console.log('Digest認証失敗 (401)。URL認証を試行します。');
-                        response = await attemptUrlAuth(url, id, password);
-                    } else {
-                         throw error;
+        // 認証情報が提供されていない場合は、匿名で直接アクセスを試みる (匿名アクセス対応)
+        if (!id || !password) {
+            console.log('認証情報なし。匿名アクセスを試行します。');
+            response = await axios.get(url, {
+                responseType: 'arraybuffer',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0'
+                },
+                timeout: 15000
+            });
+            // 匿名アクセスが成功すれば続行。失敗した場合はcatchブロックへ
+        
+        } else {
+            // 認証情報が提供されている場合は、Basic -> Digest -> URLの順で試行 (通常の認証プロセス)
+            
+            // 1. Basic認証 (ヘッダー) 試行
+            try {
+                console.log('認証試行 1: Basic認証 (ヘッダー)');
+                response = await attemptBasicAuth(url, id, password);
+            } catch (error) {
+                // 2. Digest認証 試行
+                if (error.response && error.response.status === 401) {
+                    console.log('Basic認証失敗 (401)。Digest認証を試行します。');
+                    try {
+                        response = await attemptDigestAuth(url, id, password);
+                    } catch (error) {
+                        // 3. URL認証 試行
+                        if (error.response && error.response.status === 401) {
+                            console.log('Digest認証失敗 (401)。URL認証を試行します。');
+                            response = await attemptUrlAuth(url, id, password);
+                        } else {
+                             throw error;
+                        }
                     }
+                } else {
+                    throw error;
                 }
-            } else {
-                throw error;
             }
         }
 
-        // 成功した場合の処理
+        // 成功した場合の処理 (匿名/認証のどちらでも)
         if (response) {
+            // Content-Typeを適切に設定し、画像データを返す
             res.set('Content-Type', response.headers['content-type'] || 'image/jpeg');
             return res.send(Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data));
         }
@@ -192,6 +208,7 @@ app.get('/proxy', async (req, res) => {
         const status = error.response ? error.response.status : 500;
         const statusText = error.response ? error.response.statusText : 'Internal Server Error';
         
+        // 最終的なエラー応答
         res.status(status).send(`カメラサーバーエラー: ${status} ${statusText}。認証情報またはカメラURLを確認してください。`);
     }
 });
