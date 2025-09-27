@@ -38,7 +38,7 @@ async function attemptDigestAuth(url, id, password) {
             method: 'GET',
             headers: {
                 'User-Agent': 'Mozilla/5.0',
-                // ⭐️ Axis互換性のためConnection: closeを追加
+                // Axis互換性のためConnection: closeを追加
                 'Connection': 'close' 
             },
             timeout: 15000 
@@ -69,14 +69,10 @@ async function attemptDigestAuth(url, id, password) {
         };
 
     } catch (error) {
-        // 🚨 タイムアウトやネットワークエラーなど、responseオブジェクトを持たないエラーの場合
-        if (!error.response && error.name === 'AbortError') {
-             // fetchのタイムアウトエラーはAbortErrorとして処理し、次の認証へ移行するため401としてスロー
+        // タイムアウトやネットワークエラー、予期せぬエラーの場合、次の認証へ移行するため401として処理
+        if (!error.response && (error.name === 'AbortError' || !error.response)) {
+            // 500クラッシュを防ぐために401としてスロー
             throw { response: { status: 401, statusText: 'Timeout/Network Error' } };
-        }
-        if (!error.response) {
-            // 予期せぬエラーの場合も、次の認証試行へ移行するよう401としてスロー
-            throw { response: { status: 401, statusText: 'Unexpected Digest Error' } };
         }
         // Axios形式のエラーはそのままスロー (401を含む)
         throw error;
@@ -90,7 +86,7 @@ async function attemptUrlAuth(url, id, password) {
     const host = urlObj.host;
     const pathAndQuery = urlObj.pathname + urlObj.search;
     
-    // ⭐️ IDとパスワードを強制的にURIエンコードする
+    // IDとパスワードを強制的にURIエンコードする
     const encodedId = encodeURIComponent(id);
     const encodedPassword = encodeURIComponent(password);
 
