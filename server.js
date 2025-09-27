@@ -74,7 +74,7 @@ app.get('/proxy', async (req, res) => {
         return res.status(400).send('URL is required.');
     }
     
-    // 💡 修正点 1: CORSヘッダーを可能な限り早期に設定
+    // 💡 CORSヘッダーを可能な限り早期に設定
     res.set('Access-Control-Allow-Origin', '*'); 
 
     try {
@@ -114,10 +114,15 @@ app.get('/proxy', async (req, res) => {
         }
 
         if (response) {
-            // 💡 修正点 2: Content-Typeを image/jpeg に強制
-            // これにより、カメラが不完全なヘッダーを返してもブラウザが正しく解釈できる
+            
+            // 💡 修正点 1: Content-Typeを image/jpeg に強制
             res.set('Content-Type', 'image/jpeg');
             
+            // 💡 修正点 2: キャッシュを完全に禁止するヘッダーを強制挿入
+            res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+            res.set('Pragma', 'no-cache');
+            res.set('Expires', '0');
+
             console.log('✅ 認証成功。画像データをクライアントに送信します。');
             // 画像データをクライアントに送信
             return res.send(Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data));
