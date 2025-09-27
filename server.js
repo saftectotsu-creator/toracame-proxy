@@ -2,9 +2,9 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const { URL } = require('url');
-const fetch = require('node-fetch');
-// 新しいDigest認証ライブラリ
-const DigestFetchAuth = require('node-fetch-http-digest'); 
+const fetch = require('node-fetch'); // node-fetchはaxios-digest-authでは不要ですが、Basic/URL認証のために残します
+// 最終Digest認証ライブラリ
+const AxiosDigestAuth = require('axios-digest-auth'); 
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -14,7 +14,7 @@ app.use(express.json());
 
 
 // ====================================================================
-// 🚨 ネットワーク疎通テスト用エンドポイント
+// 🚨 ネットワーク疎通テスト用エンドポイント (変更なし)
 // ====================================================================
 app.get('/test-connection', async (req, res) => {
     const { url } = req.query; 
@@ -65,21 +65,26 @@ async function attemptBasicAuth(url, id, password) {
     });
 }
 
-// 認証試行関数 2: Digest認証 (node-fetch-http-digestを使用)
+// 認証試行関数 2: Digest認証 (axios-digest-authを使用)
 async function attemptDigestAuth(url, id, password) {
-    try {
-        // 新しいライブラリの認証オブジェクトを生成
-        const auth = new DigestFetchAuth(id, password);
+    // axios-digest-authクライアントを初期化
+    const digestAuth = new AxiosDigestAuth({
+        username: id,
+        password: password
+    });
 
-        // fetchでリクエストを送信し、authオブジェクトを渡す
-        const response = await fetch(url, {
+    try {
+        // AxiosDigestAuthでGETリクエストを実行
+        const response = await digestAuth.request({
             method: 'GET',
+            url: url,
+            responseType: 'arraybuffer',
             headers: {
                 'User-Agent': 'Mozilla/5.0',
                 'Connection': 'close' 
             },
             timeout: 15000,
-            auth: auth // 認証情報をライブラリに委任
+            validateStatus: (status) => status >= 200 && status < 500 // 401もキャッチ
         });
 
         // 認証失敗時 (401) の処理
@@ -88,19 +93,10 @@ async function attemptDigestAuth(url, id, password) {
         }
 
         // 成功時 (200) の処理
-        if (response.ok) {
-            const buffer = await response.arrayBuffer();
-            return {
-                data: Buffer.from(buffer),
-                headers: response.headers,
-                status: response.status
-            };
-        }
-
-        throw { response: { status: response.status, statusText: response.statusText || 'Internal Error' } };
+        return response; 
 
     } catch (error) {
-        if (!error.response && (error.name === 'AbortError' || !error.response)) {
+        if (!error.response && error.code === 'ECONNABORTED') {
             throw { response: { status: 401, statusText: 'Timeout/Network Error' } };
         }
         throw error;
@@ -114,7 +110,6 @@ async function attemptUrlAuth(url, id, password) {
     const host = urlObj.host;
     const pathAndQuery = urlObj.pathname + urlObj.search;
     
-    // IDとパスワードを強制的にURIエンコードする
     const encodedId = encodeURIComponent(id);
     const encodedPassword = encodeURIComponent(password);
 
@@ -159,7 +154,7 @@ app.get('/proxy', async (req, res) => {
                 console.log('認証試行 1: Basic認証 (ヘッダー)');
                 response = await attemptBasicAuth(url, id, password);
             } catch (error) {
-                // 2. Digest認証 試行
+                // 2. Digest認証 試行 (Pythonで成功したロジック)
                 if (error.response && error.response.status === 401) {
                     console.log('Basic認証失敗 (401)。Digest認証を試行します。');
                     try {
