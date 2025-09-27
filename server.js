@@ -2,9 +2,8 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const { URL } = require('url');
-// ⭐️ 新しいDigest認証モジュールをインポート
-const DigestRequest = require('http-digest-request'); 
-const httpAgent = new DigestRequest(); // エージェントを初期化
+// ⭐️ 広く使われているDigest認証モジュール
+const DigestRequest = require('request-digest') 
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -26,40 +25,46 @@ async function attemptBasicAuth(url, id, password) {
     });
 }
 
-// 認証試行関数 2: Digest認証 (http-digest-requestを使用)
+// 認証試行関数 2: Digest認証 (request-digestを使用)
 async function attemptDigestAuth(url, id, password) {
     return new Promise((resolve, reject) => {
-        // http-digest-requestはコールバック形式のためPromiseでラップ
-        httpAgent.request(
-            url, 
-            id, 
-            password, 
-            (error, response, body) => {
-                if (error) {
-                    // エラーオブジェクトにステータスがないため、手動で401をチェック
-                    if (response && response.statusCode === 401) {
-                         // 401の場合はrejectして、次の認証試行へ移行
-                        return reject({ response: { status: 401 } });
-                    }
-                    return reject(error);
+        
+        // request-digestクライアントを初期化
+        const client = new DigestRequest(id, password);
+        
+        // URLをパースしてホスト、ポート、パスを取得
+        const urlObj = new URL(url);
+        
+        const options = {
+            host: urlObj.hostname,
+            port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+            path: urlObj.pathname + urlObj.search,
+            method: 'GET',
+            headers: {
+                'User-Agent': 'Mozilla/5.0'
+            }
+        };
+
+        client.request(options, (error, response, body) => {
+            if (error) {
+                // 認証失敗時、エラーハンドリングのために401としてreject
+                if (response && response.statusCode === 401) {
+                    return reject({ response: { status: 401 } });
                 }
-                
-                // 成功した場合は、Axiosの形式に合わせてレスポンスを整形してresolve
-                if (response.statusCode === 200) {
-                     resolve({
-                        data: body, // Bufferデータ
-                        headers: response.headers,
-                        status: response.statusCode
-                     });
-                } else {
-                     reject({ response: { status: response.statusCode, statusText: response.statusMessage } });
-                }
-            },
-            // メソッド、ヘッダー、タイムアウト
-            'GET', 
-            { 'User-Agent': 'Mozilla/5.0' }, 
-            15000 
-        );
+                return reject(error);
+            }
+            
+            // 成功した場合、Axios形式に合わせてレスポンスを整形
+            if (response.statusCode === 200) {
+                resolve({
+                    data: body, // Bufferデータ
+                    headers: response.headers,
+                    status: response.statusCode
+                });
+            } else {
+                 reject({ response: { status: response.statusCode, statusText: response.statusMessage || 'Unknown Error' } });
+            }
+        });
     });
 }
 
@@ -119,7 +124,6 @@ app.get('/proxy', async (req, res) => {
         // 成功した場合の処理
         if (response) {
             res.set('Content-Type', response.headers['content-type']);
-            // DigestRequestのbodyは既にBufferなのでそのまま送信
             return res.send(Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data));
         }
 
