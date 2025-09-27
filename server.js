@@ -2,8 +2,9 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const { URL } = require('url');
-// ⭐️ 確実に存在するDigest認証モジュールを使用
-const DigestFetch = require('node-fetch-digest'); 
+// ⭐️ 確実に存在するモジュールを使用
+const fetch = require('node-fetch');
+const DigestFetch = require('node-fetch-http-digest'); 
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -25,10 +26,10 @@ async function attemptBasicAuth(url, id, password) {
     });
 }
 
-// 認証試行関数 2: Digest認証 (node-fetch-digestを使用)
+// 認証試行関数 2: Digest認証 (node-fetch-http-digestを使用)
 async function attemptDigestAuth(url, id, password) {
     // Digestクライアントを初期化
-    const digestClient = new DigestFetch(id, password);
+    const digestClient = new DigestFetch(id, password, { fetch });
 
     // fetchでリクエストを実行
     const response = await digestClient.fetch(url, {
@@ -41,12 +42,10 @@ async function attemptDigestAuth(url, id, password) {
 
     // 認証失敗時、次の認証試行へ移行するためにエラーを投げる
     if (response.status === 401) {
-        // Axios形式のエラーオブジェクトに変換してreject
         throw { response: { status: 401, statusText: response.statusText || 'Unauthorized' } };
     }
 
     if (!response.ok) {
-        // 404, 500などのエラーもAxios形式に変換してreject
         throw { 
             response: { 
                 status: response.status, 
