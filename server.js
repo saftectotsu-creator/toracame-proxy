@@ -3,7 +3,7 @@ const axios = require('axios');
 const cors = require('cors');
 const { URL } = require('url');
 // ⭐️ 確実に存在するDigest認証モジュールを使用
-const DigestFetch = require('node-digest-fetch'); 
+const DigestFetch = require('node-fetch-digest'); 
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -25,7 +25,7 @@ async function attemptBasicAuth(url, id, password) {
     });
 }
 
-// 認証試行関数 2: Digest認証 (node-digest-fetchを使用)
+// 認証試行関数 2: Digest認証 (node-fetch-digestを使用)
 async function attemptDigestAuth(url, id, password) {
     // Digestクライアントを初期化
     const digestClient = new DigestFetch(id, password);
