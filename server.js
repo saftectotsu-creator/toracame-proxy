@@ -4,7 +4,7 @@ const cors = require('cors');
 const { URL } = require('url');
 const fetch = require('node-fetch'); 
 // 最終Digest認証ライブラリ
-const axiosDigestMiddleware = require('axios-auth-digest-middleware');
+const AxiosDigestAuth = require('@mhoc/axios-digest-auth');
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -65,22 +65,20 @@ async function attemptBasicAuth(url, id, password) {
     });
 }
 
-// 認証試行関数 2: Digest認証 (axios-auth-digest-middlewareを使用)
+// 認証試行関数 2: Digest認証 (@mhoc/axios-digest-authを使用)
 async function attemptDigestAuth(url, id, password) {
-    // 新しいaxiosインスタンスを作成し、Digest認証ミドルウェアを適用
-    const digestAxios = axios.create();
     
-    // ミドルウェアを設定
-    digestAxios.interceptors.request.use(
-        axiosDigestMiddleware({
+    // axiosインスタンスを認証情報で作成
+    const authAxios = AxiosDigestAuth.create({
+        auth: {
             username: id,
             password: password
-        })
-    );
+        }
+    });
 
     try {
         // GETリクエストを実行
-        const response = await digestAxios.get(url, {
+        const response = await authAxios.get(url, {
             responseType: 'arraybuffer',
             headers: {
                 'User-Agent': 'Mozilla/5.0',
@@ -157,7 +155,7 @@ app.get('/proxy', async (req, res) => {
                 console.log('認証試行 1: Basic認証 (ヘッダー)');
                 response = await attemptBasicAuth(url, id, password);
             } catch (error) {
-                // 2. Digest認証 試行 (Pythonで成功したロジックの代替)
+                // 2. Digest認証 試行
                 if (error.response && error.response.status === 401) {
                     console.log('Basic認証失敗 (401)。Digest認証を試行します。');
                     try {
