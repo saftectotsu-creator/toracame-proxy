@@ -56,7 +56,7 @@
          */
         function parseCSV(text) {
             // ログ: パース処理開始
-            console.log('--- CSVパース処理を開始 ---');
+            console.info('--- CSVパース処理を開始 ---'); // console.logから変更
 
             // 改行で分割し、空行を削除
             const lines = text.trim().split(/\r?\n/).filter(line => line.trim() !== '');
@@ -92,8 +92,8 @@
             const fileInput = document.getElementById('csvFile');
             const file = fileInput.files[0];
 
-            // ログ: 読み込み開始を明示 (このログが出ればJSは実行されている)
-            console.log('--- CSVファイル読み込み処理を開始 (handleCsvUpload) ---');
+            // ログ: 読み込み開始を明示 (console.logから変更)
+            console.info('--- CSVファイル読み込み処理を開始 (handleCsvUpload) ---');
 
             if (!file) {
                 // ファイルが選択されていない場合はエラーログを出して終了
@@ -110,8 +110,8 @@
                     const csvText = e.target.result;
                     cameras = parseCSV(csvText);
 
-                    // ログ: 読み込み成功とカメラ台数
-                    console.log(`CSVファイルを正常に読み込みました。カメラ ${cameras.length}台を検出。`);
+                    // ログ: 読み込み成功とカメラ台数 (console.logから変更)
+                    console.info(`CSVファイルを正常に読み込みました。カメラ ${cameras.length}台を検出。`);
 
                     if (cameras.length === 0) {
                         document.getElementById('cameraCount').textContent = 'カメラ 0台を登録しました (データ不正の可能性あり)';
@@ -212,8 +212,8 @@
             const MIN_IMAGE_SIZE = 500; 
             let lastError = null;
 
-            // コンソールログ開始
-            console.log(`カメラ ${index + 1}: ${camera.name} の画像取得を開始...`);
+            // コンソールログ開始 (console.logから変更)
+            console.info(`カメラ ${index + 1}: ${camera.name} の画像取得を開始...`);
 
             for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                 try {
@@ -246,7 +246,7 @@
                             // 1. クリーンアップなしで成功した場合
                             statusElement.textContent = 'OK';
                             statusElement.className = 'mt-3 text-center font-bold text-green-600';
-                            console.log(`カメラ ${index + 1}: 取得成功 (試行 ${attempt}回目), サイズ: ${buffer.byteLength} bytes`);
+                            console.info(`カメラ ${index + 1}: 取得成功 (試行 ${attempt}回目), サイズ: ${buffer.byteLength} bytes`); // console.logから変更
                             return { success: true, camera: camera.name };
 
                         } catch (loadError) {
@@ -267,7 +267,7 @@
 
                                 if (skipBytes > 0 && skipBytes < buffer.byteLength) {
                                     // 不正なバイトが発見された場合、それらをスキップ
-                                    console.log(`カメラ ${index + 1}: 先頭の ${skipBytes} バイトをクリーンアップしました。再ロード試行。`);
+                                    console.info(`カメラ ${index + 1}: 先頭の ${skipBytes} バイトをクリーンアップしました。再ロード試行。`); // console.logから変更
                                     cleanedBuffer = buffer.slice(skipBytes);
                                     
                                     // クリーンアップされたバッファで再度ロードを試みる
@@ -276,7 +276,7 @@
                                     // 3. クリーンアップ後のロード成功
                                     statusElement.textContent = 'OK (Cleaned)';
                                     statusElement.className = 'mt-3 text-center font-bold text-green-600';
-                                    console.log(`カメラ ${index + 1}: クリーンアップ後、取得成功 (試行 ${attempt}回目), サイズ: ${cleanedBuffer.byteLength} bytes`);
+                                    console.info(`カメラ ${index + 1}: クリーンアップ後、取得成功 (試行 ${attempt}回目), サイズ: ${cleanedBuffer.byteLength} bytes`); // console.logから変更
                                     return { success: true, camera: camera.name };
                                 }
                                 
