@@ -1,14 +1,15 @@
 {
   "name": "camera-proxy-server",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Proxy server for handling camera image requests.",
   "main": "proxy_server.js",
   "scripts": {
-    "start": "node proxy_server.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
-    "axios": "^1.6.8"
+    "axios": "^1.6.8",
+    "@mhoc/axios-digest-auth": "^3.1.0" 
   }
 }

@@ -1,16 +1,17 @@
 // ---------------------------------------------------------------------
-// 💡 バージョン識別: V1.3 (Digest認証テスト/多重認証ロジック搭載版 - require('require')エラー修正済み)
+// 💡 バージョン識別: V1.4 (Digest認証ライブラリ追加 & ポート3000修正版)
 // ---------------------------------------------------------------------
 const express = require('express');
 const axios = require('axios');
-const cors = require('cors'); // <<< require('cors') に修正
+const cors = require('cors'); 
 const { URL } = require('url');
 
 // Digest認証ライブラリ
 const AxiosDigestAuth = require('@mhoc/axios-digest-auth').default; 
 
 const app = express();
-const port = process.env.PORT || 10000;
+// 💡 PORTを環境変数またはデフォルトの3000を使用するように修正
+const port = process.env.PORT || 3000; 
 
 // CORSミドルウェアを全体に適用
 app.use(cors());
@@ -35,11 +36,7 @@ async function attemptBasicAuth(url, id, password) {
 
 // 2. Digest認証
 async function attemptDigestAuth(url, id, password) {
-    // 💡 注意: Digest認証はサーバー側の依存関係が必要。
-    // package.json に '@mhoc/axios-digest-auth' が入っていることを確認してください。
-    
-    // AxiosDigestAuth は以前の500エラーの原因となったため、このデプロイが成功するか確認が必要です。
-    // 成功した場合、このロジックがDigest認証を行います。
+    // AxiosDigestAuth のインスタンス作成に失敗しないように package.json を修正済み
     try {
         const digestAuth = new AxiosDigestAuth({
             username: id,
@@ -58,7 +55,6 @@ async function attemptDigestAuth(url, id, password) {
             validateStatus: (status) => status >= 200 && status < 500
         });
     } catch (e) {
-        // AxiosDigestAuth のインスタンス作成自体に失敗した場合（モジュールが見つからないなど）
         console.error('DigestAuthライブラリの呼び出しに失敗しました:', e.message);
         throw new Error('Digest認証ライブラリ設定エラー');
     }
@@ -116,6 +112,7 @@ app.get('/proxy', async (req, res) => {
                         if (err2.response && err2.response.status === 401) {
                             
                             console.log('URL認証失敗 → Digest認証へ');
+                            // 💡 Digest認証を試みる
                             response = await attemptDigestAuth(url, id, password);
                         } else {
                             throw err2;
