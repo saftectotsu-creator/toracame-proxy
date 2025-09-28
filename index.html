@@ -141,7 +141,7 @@
         }
 
         // ==============================================
-        // UI レンダリングロジック (省略)
+        // UI レンダリングロジック
         // ==============================================
         function renderCameras() {
             const grid = document.getElementById('cameraGrid');
@@ -171,7 +171,7 @@
         }
         
         // ==============================================
-        // ヘルパー関数: 画像ロードとメモリ解放 (省略)
+        // ヘルパー関数: 画像ロードとメモリ解放
         // ==============================================
         function attemptImageLoad(imageElement, buffer, index) {
             return new Promise((resolve, reject) => {
@@ -196,7 +196,7 @@
 
 
         // ==============================================
-        // 最終最終調整版: 画像取得とデータクリーニングロジック (省略)
+        // 画像取得とデータクリーニングロジック
         // ==============================================
         async function fetchSingleImage(camera, index) {
             const statusElement = document.getElementById(`status-${index}`);
@@ -212,7 +212,7 @@
             const MIN_IMAGE_SIZE = 500; 
             let lastError = null;
 
-            // コンソールログ開始 (console.logから変更)
+            // コンソールログ開始
             console.info(`カメラ ${index + 1}: ${camera.name} の画像取得を開始...`);
 
             for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -246,7 +246,7 @@
                             // 1. クリーンアップなしで成功した場合
                             statusElement.textContent = 'OK';
                             statusElement.className = 'mt-3 text-center font-bold text-green-600';
-                            console.info(`カメラ ${index + 1}: 取得成功 (試行 ${attempt}回目), サイズ: ${buffer.byteLength} bytes`); // console.logから変更
+                            console.info(`カメラ ${index + 1}: 取得成功 (試行 ${attempt}回目), サイズ: ${buffer.byteLength} bytes`); 
                             return { success: true, camera: camera.name };
 
                         } catch (loadError) {
@@ -267,7 +267,7 @@
 
                                 if (skipBytes > 0 && skipBytes < buffer.byteLength) {
                                     // 不正なバイトが発見された場合、それらをスキップ
-                                    console.info(`カメラ ${index + 1}: 先頭の ${skipBytes} バイトをクリーンアップしました。再ロード試行。`); // console.logから変更
+                                    console.info(`カメラ ${index + 1}: 先頭の ${skipBytes} バイトをクリーンアップしました。再ロード試行。`); 
                                     cleanedBuffer = buffer.slice(skipBytes);
                                     
                                     // クリーンアップされたバッファで再度ロードを試みる
@@ -276,7 +276,7 @@
                                     // 3. クリーンアップ後のロード成功
                                     statusElement.textContent = 'OK (Cleaned)';
                                     statusElement.className = 'mt-3 text-center font-bold text-green-600';
-                                    console.info(`カメラ ${index + 1}: クリーンアップ後、取得成功 (試行 ${attempt}回目), サイズ: ${cleanedBuffer.byteLength} bytes`); // console.logから変更
+                                    console.info(`カメラ ${index + 1}: クリーンアップ後、取得成功 (試行 ${attempt}回目), サイズ: ${cleanedBuffer.byteLength} bytes`); 
                                     return { success: true, camera: camera.name };
                                 }
                                 
@@ -295,8 +295,8 @@
                         
                     } else {
                         // サーバーエラー (401, 500など) の処理
-                        const errorText = await response.text();
-                        lastError = `サーバーエラー: ${response.status} ${response.statusText} (${errorText.substring(0, 50)}...)`;
+                        // エラーメッセージを短縮して、画面表示用に準備
+                        lastError = `認証またはプロキシエラー: ${response.status} ${response.statusText}`;
                         console.error(`カメラ ${index + 1}: 取得失敗 (試行 ${attempt}回目): ${lastError}`);
                         
                         if (attempt < MAX_RETRIES) {
@@ -306,7 +306,8 @@
                     }
                 } catch (error) {
                     // ネットワークエラー、または画像デコード失敗エラー
-                    lastError = `処理失敗: ${error.message}`;
+                    // エラーメッセージを短縮して、画面表示用に準備
+                    lastError = `ネットワーク/デコード失敗: ${error.message.substring(0, 40)}...`; 
                     console.error(`カメラ ${index + 1}: 処理失敗 (試行 ${attempt}回目):`, error);
 
                     if (attempt < MAX_RETRIES) {
