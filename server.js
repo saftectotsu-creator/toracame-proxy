@@ -1,89 +1,49 @@
-// server.js
-const express = require('express');
-const axios = require('axios');
-const cors = require('cors');
-const { URL } = require('url');
-const AxiosDigestAuth = require('@mhoc/axios-digest-auth').default;
+import express from "express";
+import cors from "cors";
+import AxiosDigestAuth from "@mhoc/axios-digest-auth";  // ← 正しいimport
+import axios from "axios";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
 
-// ====== Proxy endpoint for camera images ======
 app.get("/proxy", async (req, res) => {
-  const { url, user, pass } = req.query;
-
-  if (!url) {
-    return res.status(400).json({ error: "Missing url parameter" });
-  }
-
-  console.log("------------------------------------------------");
-  console.log(`▶ リクエスト: ${url}`);
-
-  let buffer = null;
-
   try {
-    // まず Basic 認証を試す
-    console.log("認証試行 1: Basic認証 (ヘッダー)");
-    const basicResp = await axios.get(url, {
-      responseType: "arraybuffer",
-      auth: {
-        username: user,
-        password: pass,
-      },
-      timeout: 8000,
+    const { url, id, password } = req.query;
+
+    if (!url || !id || !password) {
+      return res.status(400).send("Missing parameters");
+    }
+
+    // Digest認証クライアント生成
+    const digestAuth = new AxiosDigestAuth({
+      username: id,
+      password: password,
     });
 
-    if (basicResp.status === 200) {
-      console.log("✅ Basic認証成功");
-      buffer = Buffer.from(basicResp.data);
-    }
+    // まず Digest 認証リクエスト
+    const response = await digestAuth.request({
+      method: "GET",
+      url: url,
+      responseType: "arraybuffer",
+    });
+
+    res.set("Content-Type", "image/jpeg");
+    res.send(response.data);
+
   } catch (err) {
-    console.log("Basic認証失敗 (401)。Digest認証を試行します。");
-  }
+    console.error("Proxy error:", err.message);
 
-  try {
-    if (!buffer) {
-      const digestAuth = new DigestAuth({ username: user, password: pass });
-      const digestResp = await digestAuth.request({
-        method: "GET",
-        url,
-        responseType: "arraybuffer",
-        timeout: 8000,
-      });
-
-      if (digestResp.status === 200) {
-        console.log("✅ Digest認証成功");
-        buffer = Buffer.from(digestResp.data);
-      }
+    if (err.response) {
+      console.error("Camera response:", err.response.status, err.response.statusText);
+      res.status(err.response.status).send("Camera error: " + err.response.statusText);
+    } else {
+      res.status(500).send("サーバーエラー: " + err.message);
     }
-  } catch (err) {
-    console.error("Digest認証失敗:", err.message);
   }
-
-  // 画像が取得できなかった場合
-  if (!buffer) {
-    console.error("❌ 画像取得失敗");
-    return res.status(500).json({ error: "Failed to fetch image" });
-  }
-
-  // ====== JPEGヘッダーを探してゴミを除去 ======
-  const start = buffer.indexOf(Buffer.from([0xff, 0xd8]));
-  if (start > 0) {
-    console.warn(`⚠️ JPEGヘッダーの前に ${start} バイトのゴミを検出 → 削除`);
-    buffer = buffer.slice(start);
-  }
-
-  // ====== レスポンス返却 ======
-  res.set("Content-Type", "image/jpeg");
-  res.set("Access-Control-Allow-Origin", "*");
-  console.log("✅ クリーン済み画像をクライアントに送信します。");
-  res.send(buffer);
 });
 
-// ====== 起動 ======
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`Proxy server running on port ${PORT}`);
 });
