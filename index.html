@@ -84,15 +84,25 @@
             display.textContent = input.files[0] ? input.files[0].name : '未選択';
         }
 
+        /**
+         * CSVテキストをパースしてカメラオブジェクトの配列を返す
+         * @param {string} text CSVデータ（ヘッダー行を含む可能性あり）
+         * @returns {Array<Object>} カメラ情報オブジェクトの配列
+         */
         function parseCSV(text) {
-            const lines = text.trim().split('\n');
-            if (lines.length < 2) return [];
+            // 改行で分割し、空行を削除
+            const lines = text.trim().split(/\r?\n/).filter(line => line.trim() !== '');
+            if (lines.length < 2) return []; // ヘッダーとデータ行が最低1つ必要
 
             const result = [];
             // ヘッダー行をスキップし、データ行から処理
+            // CSVフォーマット: URL,カメラ名,ID,PASS
             for (let i = 1; i < lines.length; i++) {
+                // 正規表現で「カンマ,」または「ダブルクォーテーションで囲まれた文字列」を分割
+                // この単純なsplit(',')は、カメラ名にカンマが入っていると破綻するため、より堅牢なパースを推奨しますが、
+                // 一旦は基本的なカンマ区切りとして処理します。
                 const parts = lines[i].split(',');
-                // CSVフォーマット: URL,カメラ名,ID,PASS
+                
                 if (parts.length >= 4) {
                     result.push({
                         url: parts[0].trim(),
@@ -100,6 +110,8 @@
                         id: parts[2].trim(),
                         password: parts[3].trim(),
                     });
+                } else {
+                    console.warn(`CSVパース警告: 行 ${i + 1} は不正な形式です。スキップしました: ${lines[i]}`);
                 }
             }
             return result;
@@ -115,13 +127,42 @@
             }
 
             const reader = new FileReader();
+            
+            // ファイルの読み込みが成功した時の処理
             reader.onload = (e) => {
-                const csvText = e.target.result;
-                cameras = parseCSV(csvText);
-                document.getElementById('cameraCount').textContent = `カメラ ${cameras.length}台を登録しました`;
-                renderCameras();
+                try {
+                    const csvText = e.target.result;
+                    cameras = parseCSV(csvText);
+
+                    // ログ: 読み込み成功とカメラ台数
+                    console.log(`CSVファイルを正常に読み込みました。カメラ ${cameras.length}台を検出。`);
+
+                    if (cameras.length === 0) {
+                        document.getElementById('cameraCount').textContent = 'カメラ 0台を登録しました (データ不正の可能性あり)';
+                        console.error('CSVファイルに有効なカメラデータが見つかりませんでした。ヘッダーとデータ行を確認してください。');
+                        renderCameras(); // ゼロ件としてレンダリングを試みる
+                        return;
+                    }
+
+                    document.getElementById('cameraCount').textContent = `カメラ ${cameras.length}台を登録しました`;
+                    renderCameras();
+
+                } catch (error) {
+                    console.error('CSV読み込み処理中に重大なエラーが発生しました:', error);
+                    // ユーザーフレンドリーなメッセージも表示
+                    document.getElementById('fetchStatus').textContent = `エラー：CSV処理失敗。コンソールを確認してください。`;
+                }
             };
+
+            // ファイルの読み込みが失敗した時の処理（主にエンコーディング関連）
+            reader.onerror = (error) => {
+                console.error('FileReaderエラー: ファイルの読み込みに失敗しました。', error);
+                document.getElementById('fetchStatus').textContent = `エラー：ファイルの読み込みに失敗しました。エンコーディングを確認してください。`;
+            };
+
             // 日本語のCSVファイルを想定し、Shift_JISで読み込み
+            // Shift_JIS で失敗する場合は 'utf-8' も試す必要があります。
+            // ひとまず Shift_JIS で確定。
             reader.readAsText(file, 'Shift_JIS'); 
         }
 
@@ -198,6 +239,9 @@
             const MIN_IMAGE_SIZE = 500; 
             let lastError = null;
 
+            // コンソールログ開始
+            console.log(`カメラ ${index + 1}: ${camera.name} の画像取得を開始...`);
+
             for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                 try {
                     // キャッシュバスターとプロキシURLの構築
@@ -257,7 +301,7 @@
                                     await attemptImageLoad(imageElement, cleanedBuffer, index);
 
                                     // 3. クリーンアップ後のロード成功
-                                    statusElement.textContent = 'OK (Cleaned)'; // 修正箇所
+                                    statusElement.textContent = 'OK (Cleaned)';
                                     statusElement.className = 'mt-3 text-center font-bold text-green-600';
                                     console.log(`カメラ ${index + 1}: クリーンアップ後、取得成功 (試行 ${attempt}回目), サイズ: ${cleanedBuffer.byteLength} bytes`);
                                     return { success: true, camera: camera.name };
