@@ -1,8 +1,6 @@
 // server.js
 import express from "express";
 import cors from "cors";
-import fetch from "node-fetch";
-import { createProxyMiddleware } from "http-proxy-middleware";
 import DigestAuth from "@mhoc/axios-digest-auth";
 import axios from "axios";
 
