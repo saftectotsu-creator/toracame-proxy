@@ -49,19 +49,17 @@
             <p class="text-xs text-gray-500">例: http://192.168.1.1/cgi-bin/image.cgi,Entrance,user,pass123</p>
         </header>
 
-        <section class="flex items-center space-x-4 mb-8 p-4 bg-white rounded-xl shadow-lg">
-            <div class="flex items-center space-x-2">
+        <section class="flex flex-wrap items-center space-x-4 mb-8 p-4 bg-white rounded-xl shadow-lg">
+            <div class="flex items-center space-x-2 mb-2 sm:mb-0">
                 <input type="file" id="csvFileInput" accept=".csv" class="hidden">
-                <label for="csvFileInput" class="file-input-label text-sm text-gray-700 hover:bg-gray-50 transition duration-150">ファイルを選択</label>
+                <label for="csvFileInput" class="file-input-label text-sm text-gray-700 hover:bg-gray-50 transition duration-150">CSVファイルを読み込む</label>
                 <span id="fileNameDisplay" class="text-sm text-gray-500">セフテックサンプル.CSV</span>
             </div>
             
-            <button id="loadCsvButton" class="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-150 shadow-md">CSVを読み込む</button>
-            
-            <span id="statusMessage" class="text-sm text-indigo-600 font-medium">カメラ4台を登録しました</span>
-
-            <button id="fetchImagesButton" class="bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md ml-auto">全ての画像を再取得</button>
+            <button id="fetchImagesButton" class="bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md">全ての画像を再取得</button>
             <button id="savePdfButton" class="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-700 transition duration-150 shadow-md" onclick="saveAsPdf()">PDFとして保存</button>
+            
+            <span id="statusMessage" class="text-sm text-indigo-600 font-medium ml-4">カメラ4台を登録しました</span>
         </section>
 
         <p id="resultMessage" class="text-sm text-green-600 font-semibold mb-6">取得完了: 成功: 4件 / 全体: 4件</p>
@@ -71,14 +69,15 @@
             <!-- JavaScriptでここにカメラカードが挿入されます -->
         </div>
 
-        <!-- 定期PDF生成設定 (新しいセクション) -->
+        <!-- 定期PDF生成設定 -->
         <section class="mt-12 p-6 bg-yellow-50 border-l-4 border-yellow-500 rounded-lg shadow-inner">
             <h3 class="text-xl font-bold text-yellow-800 mb-4">定期PDF生成設定</h3>
             <div class="flex items-center space-x-4">
                 <label for="pdfInterval" class="text-gray-700">間隔:</label>
                 <select id="pdfInterval" class="border border-gray-300 rounded-md p-2">
                     <option value="0">無効</option>
-                    <option value="600000">10分ごと (テスト用)</option>
+                    <option value="300000">5分ごと (テスト用)</option>
+                    <option value="600000">10分ごと</option>
                     <option value="1800000">30分ごと</option>
                     <option value="3600000">1時間ごと</option>
                 </select>
@@ -92,7 +91,9 @@
 
     <script>
         const PROXY_URL = "https://toracame-proxy.onrender.com/proxy"; 
-        const CAMERA_STATUS_URL = "https://toracame-proxy.onrender.com/status"; // SDカードチェック用
+        const CAMERA_STATUS_URL = "https://toracame-proxy.onrender.com/status"; 
+        const CORRECT_ID = 'saftec';
+        const CORRECT_PASS = 'camcheck';
         let cameras = []; 
         let pdfIntervalId = null; 
 
@@ -104,7 +105,7 @@
             const password = document.getElementById('password').value;
             const authMessage = document.getElementById('authMessage');
 
-            if (username === 'saftec' && password === 'camcheck') {
+            if (username === CORRECT_ID && password === CORRECT_PASS) {
                 document.getElementById('authModal').classList.add('hidden');
                 document.getElementById('mainContent').classList.remove('hidden');
                 authMessage.classList.add('hidden');
@@ -120,7 +121,7 @@
         // ====================================================================
         function initializeApp() {
             // イベントリスナー設定
-            document.getElementById('loadCsvButton').addEventListener('click', handleCsvLoad);
+            document.getElementById('csvFileInput').addEventListener('change', handleCsvLoad);
             document.getElementById('fetchImagesButton').addEventListener('click', fetchImages);
             document.getElementById('csvFileInput').addEventListener('change', (event) => {
                 const fileName = event.target.files[0] ? event.target.files[0].name : 'ファイルを選択';
@@ -143,9 +144,8 @@
         // ====================================================================
         // CSV処理
         // ====================================================================
-        function handleCsvLoad() {
-            const fileInput = document.getElementById('csvFileInput');
-            const file = fileInput.files[0];
+        function handleCsvLoad(event) {
+            const file = event.target.files[0];
             if (!file) {
                 alert('CSVファイルを選択してください。');
                 return;
@@ -172,7 +172,7 @@
             const cameraList = [];
             
             // ヘッダー行をスキップし、データ行を処理
-            for (let i = 1; i < lines.length; i++) {
+            for (let i = 0; i < lines.length; i++) {
                 const line = lines[i].trim();
                 if (!line) continue;
                 
@@ -208,7 +208,10 @@
                     </div>
                     <p id="status-${index}" class="mt-2 text-center text-sm font-medium text-red-500">画像未取得</p>
                     <p id="time-${index}" class="mt-1 text-center text-xs text-gray-500">--</p>
-                    <p id="sd-status-${index}" class="mt-1 text-center text-xs font-semibold text-gray-700">SDカード: 確認中...</p>
+                    <div class="mt-2 p-2 bg-gray-50 rounded-lg">
+                        <p id="sd-status-${index}" class="text-xs font-semibold text-gray-700">SDカード: 確認中...</p>
+                        <p id="network-status-${index}" class="text-xs font-semibold text-gray-700">ネットワークシェア: 確認中...</p>
+                    </div>
                 `;
                 grid.appendChild(card);
             });
@@ -229,10 +232,11 @@
             statusElement.textContent = '取得中...';
             statusElement.className = 'mt-2 text-center text-sm font-medium text-indigo-500';
 
-            // 1. 画像取得
-            const proxyUrl = `${PROXY_URL}?url=${encodeURIComponent(camera.url)}&id=${encodeURIComponent(camera.id)}&password=${encodeURIComponent(camera.password)}`;
             let success = false;
             let errorMessage = '不明なエラー';
+            
+            // 1. 画像取得
+            const proxyUrl = `${PROXY_URL}?url=${encodeURIComponent(camera.url)}&id=${encodeURIComponent(camera.id)}&password=${encodeURIComponent(camera.password)}`;
 
             try {
                 const response = await fetch(proxyUrl);
@@ -266,33 +270,56 @@
                 console.error(`カメラ ${index + 1} エラー:`, error.message);
             }
             
-            // 2. SDカードステータスチェック（プロキシ経由）
+            // 2. SDカード/ネットワークシェアステータスチェック
             const sdStatusElement = document.getElementById(`sd-status-${index}`);
+            const networkStatusElement = document.getElementById(`network-status-${index}`);
             sdStatusElement.textContent = 'SDカード: 確認中...';
-            sdStatusElement.className = 'mt-1 text-center text-xs font-semibold text-gray-700';
+            networkStatusElement.textContent = 'ネットワークシェア: 確認中...';
+
 
             try {
-                // カメラのステータスを取得するプロキシURL (実装はサーバー側)
                 const statusProxyUrl = `${CAMERA_STATUS_URL}?url=${encodeURIComponent(camera.url)}&id=${encodeURIComponent(camera.id)}&password=${encodeURIComponent(camera.password)}`;
                 const statusResponse = await fetch(statusProxyUrl);
                 
                 if (statusResponse.ok) {
-                    const statusText = await statusResponse.text();
-                    // サーバー側で取得したステータスをそのまま表示
-                    if (statusText.includes('OK') || statusText.includes('Mounted')) {
-                        sdStatusElement.textContent = 'SDカード: マウントOK';
-                        sdStatusElement.className = 'mt-1 text-center text-xs font-semibold text-green-600';
+                    const statusData = await statusResponse.json();
+                    
+                    // SDカード (SD_DISK) の処理
+                    const sdData = statusData['SD_DISK'];
+                    if (sdData) {
+                        const status = sdData.status === 'OK' ? 'OK' : sdData.status;
+                        const color = sdData.status === 'OK' ? 'text-green-600' : 'text-red-600';
+                        sdStatusElement.innerHTML = `SDカード: <span class="${color}">${status}</span> (空き: ${sdData.freesize})`;
                     } else {
-                         sdStatusElement.textContent = `SDカード: ${statusText}`;
-                         sdStatusElement.className = 'mt-1 text-center text-xs font-semibold text-red-600';
+                         sdStatusElement.textContent = 'SDカード: 情報なし';
+                         sdStatusElement.className = 'text-xs font-semibold text-gray-500';
                     }
+
+                    // ネットワークシェア (NetworkShare) の処理
+                    const netData = statusData['NetworkShare'];
+                    if (netData) {
+                        const status = netData.status === 'OK' ? 'OK' : netData.status;
+                        const color = netData.status === 'OK' ? 'text-green-600' : 'text-red-600';
+                        networkStatusElement.innerHTML = `ネットシェア: <span class="${color}">${status}</span> (空き: ${netData.freesize})`;
+                    } else {
+                         networkStatusElement.textContent = 'ネットワークシェア: 情報なし';
+                         networkStatusElement.className = 'text-xs font-semibold text-gray-500';
+                    }
+
                 } else {
-                    sdStatusElement.textContent = `SDカード: 取得失敗 (Status: ${statusResponse.status})`;
-                    sdStatusElement.className = 'mt-1 text-center text-xs font-semibold text-red-600';
+                    const errorJson = await statusResponse.json();
+                    const errorMessage = `エラー: ${errorJson.error || '通信失敗'}`;
+                    sdStatusElement.textContent = `SDカード: ${errorMessage}`;
+                    networkStatusElement.textContent = `ネットワークシェア: ${errorMessage}`;
+                    sdStatusElement.className = 'text-xs font-semibold text-red-600';
+                    networkStatusElement.className = 'text-xs font-semibold text-red-600';
                 }
             } catch (error) {
+                console.error("SDカード/ネットワークステータスチェックエラー:", error);
                 sdStatusElement.textContent = 'SDカード: 通信エラー';
-                sdStatusElement.className = 'mt-1 text-center text-xs font-semibold text-red-600';
+                networkStatusElement.textContent = 'ネットワークシェア: 通信エラー';
+                sdStatusElement.className = 'text-xs font-semibold text-red-600';
+                networkStatusElement.className = 'text-xs font-semibold text-red-600';
             }
             
             return success;
@@ -326,6 +353,12 @@
 
         // PDF保存処理 (手動/自動共通)
         async function saveAsPdf(isScheduled = false) {
+            // PDF機能がブラウザで有効か確認
+            if (typeof window.jspdf === 'undefined' || typeof window.html2canvas === 'undefined') {
+                alert('PDF生成ライブラリの読み込みが完了していません。しばらく待って再試行してください。');
+                return;
+            }
+            
             const timestamp = new Date().toLocaleString('ja-JP', { 
                 year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
                 hour12: false
