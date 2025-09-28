@@ -155,9 +155,34 @@
             // ロード後、すぐに画像取得を開始
             fetchImages();
         }
+        
+        // ==============================================
+        // ヘルパー関数: 画像ロードとメモリ解放
+        // ==============================================
+        function attemptImageLoad(imageElement, buffer, index) {
+            return new Promise((resolve, reject) => {
+                const blob = new Blob([buffer], { type: 'image/jpeg' });
+                const imageUrl = URL.createObjectURL(blob);
+                
+                // 成功した場合
+                imageElement.onload = () => {
+                    URL.revokeObjectURL(imageUrl); // メモリ解放
+                    resolve(true);
+                };
+                // 失敗した場合 (データが不正でブラウザがデコードできなかった場合)
+                imageElement.onerror = () => {
+                    URL.revokeObjectURL(imageUrl); // メモリ解放
+                    reject(new Error('画像デコード失敗 (不正なデータ構造)'));
+                };
+                
+                // 画像ソースを設定し、ロードを開始
+                imageElement.src = imageUrl;
+            });
+        }
+
 
         // ==============================================
-        // 最終調整版: 画像取得とリトライロジック (画像デコード失敗監視機能追加)
+        // 最終最終調整版: 画像取得とデータクリーニングロジック
         // ==============================================
         async function fetchSingleImage(camera, index) {
             const statusElement = document.getElementById(`status-${index}`);
@@ -168,7 +193,7 @@
             statusElement.className = 'mt-3 text-center font-bold text-gray-500';
             imageElement.src = 'https://placehold.co/100x100/eeeeee/000000?text=Loading';
 
-            const MAX_RETRIES = 5; // リトライ回数を増やします
+            const MAX_RETRIES = 5; 
             const RETRY_DELAY_MS = 1500; 
             const MIN_IMAGE_SIZE = 500; 
             let lastError = null;
@@ -183,11 +208,11 @@
 
                     if (response.ok) {
                         const buffer = await response.arrayBuffer();
-                        const blob = new Blob([buffer], { type: 'image/jpeg' });
-                        
+                        let cleanedBuffer = buffer; // クリーニング前のオリジナルバッファ
+
                         // データのサイズチェック
-                        if (blob.size < MIN_IMAGE_SIZE) {
-                            lastError = `画像データが小さすぎます (${blob.size} bytes)。`;
+                        if (buffer.byteLength < MIN_IMAGE_SIZE) {
+                            lastError = `画像データが小さすぎます (${buffer.byteLength} bytes)。`;
                             console.warn(`カメラ ${index + 1}: ${lastError} リトライ実行`);
                             
                             if (attempt < MAX_RETRIES) {
@@ -197,27 +222,59 @@
                             }
                         }
 
-                        // 成功した場合、Blob URLを作成して表示
-                        const imageUrl = URL.createObjectURL(blob);
-                        
-                        // 💡 最終調整点: 画像のロード成功/失敗を監視する
-                        const imageLoadPromise = new Promise((resolve, reject) => {
-                            // 成功した場合
-                            imageElement.onload = () => resolve(true);
-                            // 失敗した場合 (データが不正でブラウザがデコードできなかった場合)
-                            imageElement.onerror = () => reject(new Error('画像デコード失敗 (不正なデータ構造)'));
+                        // ロード試行とデータクリーニング
+                        try {
+                            await attemptImageLoad(imageElement, buffer, index);
                             
-                            // 画像ソースを設定し、ロードを開始
-                            imageElement.src = imageUrl;
-                        });
+                            // 1. クリーンアップなしで成功した場合
+                            statusElement.textContent = 'OK';
+                            statusElement.className = 'mt-3 text-center font-bold text-green-600';
+                            console.log(`カメラ ${index + 1}: 取得成功 (試行 ${attempt}回目), サイズ: ${buffer.byteLength} bytes`);
+                            return { success: true, camera: camera.name };
 
-                        await imageLoadPromise; // ロード完了を待つ
+                        } catch (loadError) {
+                            // 2. クリーンアップなしでデコード失敗した場合
+                            if (loadError.message === '画像デコード失敗 (不正なデータ構造)' && attempt < MAX_RETRIES) {
+                                console.warn(`カメラ ${index + 1}: デコード失敗。データクリーニングを試みます...`);
+                                
+                                // JPEGマジックバイト (0xFF, 0xD8) を探すロジック
+                                const dataView = new DataView(buffer);
+                                let skipBytes = 0;
+                                while (skipBytes < buffer.byteLength - 1) {
+                                    // 最初の 0xFFD8 を探す
+                                    if (dataView.getUint8(skipBytes) === 0xFF && dataView.getUint8(skipBytes + 1) === 0xD8) {
+                                        break; 
+                                    }
+                                    skipBytes++;
+                                }
 
-                        // ロード成功後の処理
-                        statusElement.textContent = 'OK';
-                        statusElement.className = 'mt-3 text-center font-bold text-green-600';
-                        console.log(`カメラ ${index + 1}: 取得成功 (試行 ${attempt}回目), サイズ: ${blob.size} bytes`);
-                        return { success: true, camera: camera.name };
+                                if (skipBytes > 0 && skipBytes < buffer.byteLength) {
+                                    // 不正なバイトが発見された場合、それらをスキップ
+                                    console.log(`カメラ ${index + 1}: 先頭の ${skipBytes} バイトをクリーンアップしました。再ロード試行。`);
+                                    cleanedBuffer = buffer.slice(skipBytes);
+                                    
+                                    // クリーンアップされたバッファで再度ロードを試みる
+                                    await attemptImageLoad(imageElement, cleanedBuffer, index);
+
+                                    // 3. クリーンアップ後のロード成功
+                                    statusElement.textContent = 'OK (Cleaned)'; // 修正箇所
+                                    statusElement.className = 'mt-3 text-center font-bold text-green-600';
+                                    console.log(`カメラ ${index + 1}: クリーンアップ後、取得成功 (試行 ${attempt}回目), サイズ: ${cleanedBuffer.byteLength} bytes`);
+                                    return { success: true, camera: camera.name };
+                                }
+                                
+                                // クリーンアップしてもダメだった場合、通常のリトライへ
+                                lastError = 'デコード失敗後、データクリーニングも効果なし。';
+                                console.error(`カメラ ${index + 1}: ${lastError} 次のリトライへ。`);
+                                statusElement.textContent = `デコード失敗。リトライ中 (${attempt}/${MAX_RETRIES})...`;
+                                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+                                continue;
+
+                            } else {
+                                // その他のロードエラー (MAX_RETRIESに到達したデコード失敗など) は、外側の catch へ
+                                throw loadError;
+                            }
+                        }
                         
                     } else {
                         // サーバーエラー (401, 500など) の処理
