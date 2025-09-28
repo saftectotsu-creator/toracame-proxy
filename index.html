@@ -36,15 +36,17 @@
 
         <!-- コントロールパネル -->
         <div class="flex flex-wrap items-center space-y-4 md:space-y-0 md:space-x-4 mb-8">
-            <input type="file" id="csvFile" accept=".csv" class="hidden" onchange="displayFileName(this)">
+            <!-- ファイル選択時の変更を検知したら即座に読み込みを試行するように修正 -->
+            <input type="file" id="csvFile" accept=".csv" class="hidden" onchange="handleFileSelected(this)">
             
             <button onclick="document.getElementById('csvFile').click()" class="px-4 py-2 bg-gray-500 text-white font-semibold rounded-lg hover:bg-gray-600 transition duration-150 shadow-md">
                 ファイルを選択
                 <span id="fileNameDisplay" class="ml-2 text-sm text-gray-200">未選択</span>
             </button>
             
-            <button onclick="handleCsvUpload()" class="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition duration-150 shadow-md">
-                CSVを読み込む
+            <!-- 読み込みボタンは、ファイル選択時の処理をトリガーするよう変更 -->
+            <button onclick="document.getElementById('csvFile').click()" class="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition duration-150 shadow-md">
+                CSVを読み込む (ファイルを選択)
             </button>
             
             <span id="cameraCount" class="text-lg font-bold text-orange-600 ml-4">カメラ 0台を登録しました</span>
@@ -85,9 +87,16 @@
         }
 
         /**
+         * CSVファイルが選択されたときに、ファイル名を表示し、読み込み処理を開始する
+         * @param {HTMLInputElement} input file input element
+         */
+        function handleFileSelected(input) {
+            displayFileName(input); // ファイル名を表示
+            handleCsvUpload(); // 読み込み処理を開始
+        }
+
+        /**
          * CSVテキストをパースしてカメラオブジェクトの配列を返す
-         * @param {string} text CSVデータ（ヘッダー行を含む可能性あり）
-         * @returns {Array<Object>} カメラ情報オブジェクトの配列
          */
         function parseCSV(text) {
             // 改行で分割し、空行を削除
@@ -96,13 +105,10 @@
 
             const result = [];
             // ヘッダー行をスキップし、データ行から処理
-            // CSVフォーマット: URL,カメラ名,ID,PASS
             for (let i = 1; i < lines.length; i++) {
-                // 正規表現で「カンマ,」または「ダブルクォーテーションで囲まれた文字列」を分割
-                // この単純なsplit(',')は、カメラ名にカンマが入っていると破綻するため、より堅牢なパースを推奨しますが、
-                // 一旦は基本的なカンマ区切りとして処理します。
                 const parts = lines[i].split(',');
                 
+                // CSVフォーマット: URL,カメラ名,ID,PASS
                 if (parts.length >= 4) {
                     result.push({
                         url: parts[0].trim(),
@@ -121,8 +127,13 @@
             const fileInput = document.getElementById('csvFile');
             const file = fileInput.files[0];
 
+            // ログ: 読み込み開始を明示
+            console.log('--- CSVファイル読み込み処理を開始 ---');
+
             if (!file) {
-                alert('CSVファイルを選択してください。');
+                // ファイルが選択されていない場合はエラーログを出して終了
+                console.error('致命的エラー: ファイル入力要素にファイルがセットされていません。');
+                document.getElementById('fetchStatus').textContent = 'エラー：ファイルを選択してください。';
                 return;
             }
 
@@ -148,7 +159,7 @@
                     renderCameras();
 
                 } catch (error) {
-                    console.error('CSV読み込み処理中に重大なエラーが発生しました:', error);
+                    console.error('CSVパース処理中に重大なエラーが発生しました:', error);
                     // ユーザーフレンドリーなメッセージも表示
                     document.getElementById('fetchStatus').textContent = `エラー：CSV処理失敗。コンソールを確認してください。`;
                 }
@@ -161,8 +172,6 @@
             };
 
             // 日本語のCSVファイルを想定し、Shift_JISで読み込み
-            // Shift_JIS で失敗する場合は 'utf-8' も試す必要があります。
-            // ひとまず Shift_JIS で確定。
             reader.readAsText(file, 'Shift_JIS'); 
         }
 
