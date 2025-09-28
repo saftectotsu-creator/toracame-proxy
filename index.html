@@ -40,6 +40,7 @@
         // 全てのJavaScript関数をDOMContentLoadedの外に定義
 
         let cameras = [];
+        // プロキシサーバーのベースURL
         const PROXY_BASE_URL = 'https://toracame-proxy.onrender.com/proxy'; 
 
         // ==============================================
@@ -56,7 +57,7 @@
          */
         function parseCSV(text) {
             // ログ: パース処理開始
-            console.info('--- CSVパース処理を開始 ---'); // console.logから変更
+            console.info('--- CSVパース処理を開始 ---');
 
             // 改行で分割し、空行を削除
             const lines = text.trim().split(/\r?\n/).filter(line => line.trim() !== '');
@@ -68,6 +69,7 @@
             const result = [];
             // ヘッダー行をスキップし、データ行から処理
             for (let i = 1; i < lines.length; i++) {
+                // カンマで分割。CSVファイルに二重引用符が含まれる場合は、より堅牢なパーサーが必要です
                 const parts = lines[i].split(',');
                 
                 // CSVフォーマット: URL,カメラ名,ID,PASS
@@ -92,7 +94,7 @@
             const fileInput = document.getElementById('csvFile');
             const file = fileInput.files[0];
 
-            // ログ: 読み込み開始を明示 (console.logから変更)
+            // ログ: 読み込み開始を明示
             console.info('--- CSVファイル読み込み処理を開始 (handleCsvUpload) ---');
 
             if (!file) {
@@ -110,7 +112,7 @@
                     const csvText = e.target.result;
                     cameras = parseCSV(csvText);
 
-                    // ログ: 読み込み成功とカメラ台数 (console.logから変更)
+                    // ログ: 読み込み成功とカメラ台数
                     console.info(`CSVファイルを正常に読み込みました。カメラ ${cameras.length}台を検出。`);
 
                     if (cameras.length === 0) {
@@ -175,15 +177,17 @@
         // ==============================================
         function attemptImageLoad(imageElement, buffer, index) {
             return new Promise((resolve, reject) => {
+                // 画像データ (ArrayBuffer) から Blob を作成
                 const blob = new Blob([buffer], { type: 'image/jpeg' });
+                // Blob から一時的な URL を作成
                 const imageUrl = URL.createObjectURL(blob);
                 
-                // 成功した場合
+                // 画像ロード成功時の処理
                 imageElement.onload = () => {
                     URL.revokeObjectURL(imageUrl); // メモリ解放
                     resolve(true);
                 };
-                // 失敗した場合 (データが不正でブラウザがデコードできなかった場合)
+                // 画像ロード失敗時（データが不正でブラウザがデコードできなかった場合）の処理
                 imageElement.onerror = () => {
                     URL.revokeObjectURL(imageUrl); // メモリ解放
                     reject(new Error('画像デコード失敗 (不正なデータ構造)'));
@@ -207,9 +211,9 @@
             statusElement.className = 'mt-3 text-center font-bold text-gray-500';
             imageElement.src = 'https://placehold.co/100x100/eeeeee/000000?text=Loading';
 
-            const MAX_RETRIES = 5; 
-            const RETRY_DELAY_MS = 1500; 
-            const MIN_IMAGE_SIZE = 500; 
+            const MAX_RETRIES = 5; // 最大リトライ回数
+            const RETRY_DELAY_MS = 1500; // リトライ遅延時間 (ms)
+            const MIN_IMAGE_SIZE = 500; // 有効な画像と見なす最小バイト数
             let lastError = null;
 
             // コンソールログ開始
@@ -299,9 +303,16 @@
                         lastError = `認証またはプロキシエラー: ${response.status} ${response.statusText}`;
                         console.error(`カメラ ${index + 1}: 取得失敗 (試行 ${attempt}回目): ${lastError}`);
                         
+                        // ***リトライ失敗時のみステータスを更新する***
                         if (attempt < MAX_RETRIES) {
                             statusElement.textContent = `リトライ中 (${attempt}/${MAX_RETRIES})...`;
                             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+                        } else {
+                            // 最終リトライで失敗したら、即座にエラーを表示してループを抜ける
+                            statusElement.textContent = `エラー: ${lastError}`;
+                            statusElement.className = 'mt-3 text-center font-bold text-red-600';
+                            imageElement.src = 'https://placehold.co/100x100/ffbbbb/800000?text=エラー';
+                            return { success: false, camera: camera.name };
                         }
                     }
                 } catch (error) {
@@ -313,11 +324,17 @@
                     if (attempt < MAX_RETRIES) {
                         statusElement.textContent = `リトライ中 (${attempt}/${MAX_RETRIES})...`;
                         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+                    } else {
+                         // 最終リトライで失敗したら、即座にエラーを表示してループを抜ける
+                        statusElement.textContent = `エラー: ${lastError}`;
+                        statusElement.className = 'mt-3 text-center font-bold text-red-600';
+                        imageElement.src = 'https://placehold.co/100x100/ffbbbb/800000?text=エラー';
+                        return { success: false, camera: camera.name };
                     }
                 }
             }
 
-            // 全てのリトライが失敗した場合
+            // 全てのリトライが失敗した場合のフォールバック
             statusElement.textContent = `エラー: ${lastError}`;
             statusElement.className = 'mt-3 text-center font-bold text-red-600';
             imageElement.src = 'https://placehold.co/100x100/ffbbbb/800000?text=エラー';
@@ -338,11 +355,13 @@
             refreshButton.textContent = '取得処理中...';
 
             const promises = cameras.map((camera, index) => fetchSingleImage(camera, index));
+            // Promise.allSettled を使用して、一部の失敗を無視して全てのカメラを処理
             const results = await Promise.allSettled(promises);
 
             let successCount = 0;
             results.forEach(result => {
-                if (result.status === 'fulfilled' && result.value.success) {
+                // 結果の確認: ステータスが 'fulfilled' で、かつ関数から返された success フラグが true の場合
+                if (result.status === 'fulfilled' && result.value && result.value.success) {
                     successCount++;
                 }
             });
@@ -366,16 +385,16 @@
 
         <!-- コントロールパネル -->
         <div class="flex flex-wrap items-center space-y-4 md:space-y-0 md:space-x-4 mb-8">
-            <!-- 変更点1: onchangeを削除 -->
+            <!-- ファイル入力要素 (非表示) -->
             <input type="file" id="csvFile" accept=".csv" class="hidden"> 
             
-            <!-- ファイル選択ボタンは、ダイアログを開くだけ -->
+            <!-- ファイル選択ボタン -->
             <button onclick="document.getElementById('csvFile').click()" class="px-4 py-2 bg-gray-500 text-white font-semibold rounded-lg hover:bg-gray-600 transition duration-150 shadow-md">
                 ファイルを選択
                 <span id="fileNameDisplay" class="ml-2 text-sm text-gray-200">未選択</span>
             </button>
             
-            <!-- 変更点2: クリックで読み込み処理を強制実行 -->
+            <!-- 読み込み実行ボタン -->
             <button onclick="handleCsvUpload()" class="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition duration-150 shadow-md">
                 CSVを読み込む (実行)
             </button>
