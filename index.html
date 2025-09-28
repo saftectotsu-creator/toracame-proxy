@@ -40,7 +40,6 @@
         // 全てのJavaScript関数をDOMContentLoadedの外に定義
 
         let cameras = [];
-        // プロキシサーバーのベースURL
         const PROXY_BASE_URL = 'https://toracame-proxy.onrender.com/proxy'; 
 
         // ==============================================
@@ -69,7 +68,6 @@
             const result = [];
             // ヘッダー行をスキップし、データ行から処理
             for (let i = 1; i < lines.length; i++) {
-                // カンマで分割。CSVファイルに二重引用符が含まれる場合は、より堅牢なパーサーが必要です
                 const parts = lines[i].split(',');
                 
                 // CSVフォーマット: URL,カメラ名,ID,PASS
@@ -177,17 +175,15 @@
         // ==============================================
         function attemptImageLoad(imageElement, buffer, index) {
             return new Promise((resolve, reject) => {
-                // 画像データ (ArrayBuffer) から Blob を作成
                 const blob = new Blob([buffer], { type: 'image/jpeg' });
-                // Blob から一時的な URL を作成
                 const imageUrl = URL.createObjectURL(blob);
                 
-                // 画像ロード成功時の処理
+                // 成功した場合
                 imageElement.onload = () => {
                     URL.revokeObjectURL(imageUrl); // メモリ解放
                     resolve(true);
                 };
-                // 画像ロード失敗時（データが不正でブラウザがデコードできなかった場合）の処理
+                // 失敗した場合 (データが不正でブラウザがデコードできなかった場合)
                 imageElement.onerror = () => {
                     URL.revokeObjectURL(imageUrl); // メモリ解放
                     reject(new Error('画像デコード失敗 (不正なデータ構造)'));
@@ -211,9 +207,9 @@
             statusElement.className = 'mt-3 text-center font-bold text-gray-500';
             imageElement.src = 'https://placehold.co/100x100/eeeeee/000000?text=Loading';
 
-            const MAX_RETRIES = 5; // 最大リトライ回数
-            const RETRY_DELAY_MS = 1500; // リトライ遅延時間 (ms)
-            const MIN_IMAGE_SIZE = 500; // 有効な画像と見なす最小バイト数
+            const MAX_RETRIES = 5; 
+            const RETRY_DELAY_MS = 1500; 
+            const MIN_IMAGE_SIZE = 500; 
             let lastError = null;
 
             // コンソールログ開始
@@ -299,42 +295,27 @@
                         
                     } else {
                         // サーバーエラー (401, 500など) の処理
-                        // エラーメッセージを短縮して、画面表示用に準備
                         lastError = `認証またはプロキシエラー: ${response.status} ${response.statusText}`;
                         console.error(`カメラ ${index + 1}: 取得失敗 (試行 ${attempt}回目): ${lastError}`);
                         
-                        // ***リトライ失敗時のみステータスを更新する***
                         if (attempt < MAX_RETRIES) {
                             statusElement.textContent = `リトライ中 (${attempt}/${MAX_RETRIES})...`;
                             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-                        } else {
-                            // 最終リトライで失敗したら、即座にエラーを表示してループを抜ける
-                            statusElement.textContent = `エラー: ${lastError}`;
-                            statusElement.className = 'mt-3 text-center font-bold text-red-600';
-                            imageElement.src = 'https://placehold.co/100x100/ffbbbb/800000?text=エラー';
-                            return { success: false, camera: camera.name };
                         }
                     }
                 } catch (error) {
                     // ネットワークエラー、または画像デコード失敗エラー
-                    // エラーメッセージを短縮して、画面表示用に準備
-                    lastError = `ネットワーク/デコード失敗: ${error.message.substring(0, 40)}...`; 
+                    lastError = `ネットワーク/デコード失敗: ${error.message.substring(0, 40)}`; 
                     console.error(`カメラ ${index + 1}: 処理失敗 (試行 ${attempt}回目):`, error);
 
                     if (attempt < MAX_RETRIES) {
                         statusElement.textContent = `リトライ中 (${attempt}/${MAX_RETRIES})...`;
                         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-                    } else {
-                         // 最終リトライで失敗したら、即座にエラーを表示してループを抜ける
-                        statusElement.textContent = `エラー: ${lastError}`;
-                        statusElement.className = 'mt-3 text-center font-bold text-red-600';
-                        imageElement.src = 'https://placehold.co/100x100/ffbbbb/800000?text=エラー';
-                        return { success: false, camera: camera.name };
                     }
                 }
             }
 
-            // 全てのリトライが失敗した場合のフォールバック
+            // 全てのリトライが失敗した場合
             statusElement.textContent = `エラー: ${lastError}`;
             statusElement.className = 'mt-3 text-center font-bold text-red-600';
             imageElement.src = 'https://placehold.co/100x100/ffbbbb/800000?text=エラー';
@@ -344,7 +325,6 @@
 
         async function fetchImages() {
             if (cameras.length === 0) {
-                // ファイルが読み込まれていない場合はアラートをカスタムUIに変更
                 document.getElementById('fetchStatus').textContent = 'エラー: カメラが登録されていません。CSVを読み込んでください。';
                 console.error('画像取得エラー: カメラリストが空です。');
                 return;
@@ -355,13 +335,11 @@
             refreshButton.textContent = '取得処理中...';
 
             const promises = cameras.map((camera, index) => fetchSingleImage(camera, index));
-            // Promise.allSettled を使用して、一部の失敗を無視して全てのカメラを処理
             const results = await Promise.allSettled(promises);
 
             let successCount = 0;
             results.forEach(result => {
-                // 結果の確認: ステータスが 'fulfilled' で、かつ関数から返された success フラグが true の場合
-                if (result.status === 'fulfilled' && result.value && result.value.success) {
+                if (result.status === 'fulfilled' && result.value.success) {
                     successCount++;
                 }
             });

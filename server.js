@@ -1,8 +1,7 @@
 // Node.jsとExpressを使ったHTTPプロキシサーバー
 const express = require('express');
-const cors = require('cors');
-// ダイジェスト認証をサポートするために、@mhoc/axios-digest-authライブラリをインポート
-const AxiosDigestAuth = require('@mhoc/axios-digest-auth').default; 
+const axios = require('axios'); // Simple axiosを使用
+const cors = require('require');
 
 const app = express();
 // Renderの環境変数PORTまたはデフォルトの3000を使用
@@ -18,7 +17,6 @@ app.use(cors({
 
 /**
  * 画像取得のためのプロキシエンドポイント
- * クライアントから送られたカメラのURL、ID、PASSを使用して画像を代理取得する。
  */
 app.get('/proxy', async (req, res) => {
     // 1. パラメータの取得とデコード
@@ -33,22 +31,20 @@ app.get('/proxy', async (req, res) => {
 
     console.log(`INFO: Proxying request for URL: ${targetUrl} (ID: ${authId})`);
 
-    // 2. Digest認証インスタンスの生成
-    const auth = new AxiosDigestAuth({
-        username: authId,
-        password: authPassword
-    });
-
     try {
-        // 3. ターゲットカメラへのリクエスト実行（Digest認証を適用）
-        const response = await auth.request({
+        // 2. ターゲットURLへのリクエスト実行（Basic認証を使用）
+        const response = await axios({
             method: 'get',
             url: targetUrl,
             responseType: 'arraybuffer', // 画像データとしてバッファで受け取る
-            timeout: 10000 // 10秒でタイムアウト
+            auth: {
+                username: authId,
+                password: authPassword,
+            },
+            timeout: 10000 
         });
 
-        // 4. レスポンスヘッダーの設定とデータ送信
+        // 3. レスポンスヘッダーの設定とデータ送信
         const contentType = response.headers['content-type'] || 'application/octet-stream';
         
         res.setHeader('Content-Type', contentType);
@@ -59,14 +55,12 @@ app.get('/proxy', async (req, res) => {
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');
 
-        // 画像データをクライアントに送信
         res.send(response.data);
 
         console.log(`SUCCESS: Proxied request for ${authId} finished with status ${response.status} and size ${response.data.length} bytes.`);
 
     } catch (error) {
-        // 5. エラーハンドリング
-        // ターゲットカメラが返すステータスコード（401, 404など）をクライアントに返す
+        // 4. エラーハンドリング
         const status = error.response ? error.response.status : error.code === 'ECONNABORTED' ? 408 : 500;
         const statusText = error.response ? error.response.statusText : error.code === 'ECONNABORTED' ? 'Request Timeout' : 'Internal Server Error';
         
