@@ -157,7 +157,7 @@
         }
 
         // ==============================================
-        // 最終版: 画像取得とリトライロジック (MIME強制 & データサイズチェック機能付き)
+        // 最終調整版: 画像取得とリトライロジック (画像デコード失敗監視機能追加)
         // ==============================================
         async function fetchSingleImage(camera, index) {
             const statusElement = document.getElementById(`status-${index}`);
@@ -168,14 +168,14 @@
             statusElement.className = 'mt-3 text-center font-bold text-gray-500';
             imageElement.src = 'https://placehold.co/100x100/eeeeee/000000?text=Loading';
 
-            const MAX_RETRIES = 3;
-            const RETRY_DELAY_MS = 1500; // 1.5秒待機
-            const MIN_IMAGE_SIZE = 500; // 500バイト未満は不完全な画像データと見なす
+            const MAX_RETRIES = 5; // リトライ回数を増やします
+            const RETRY_DELAY_MS = 1500; 
+            const MIN_IMAGE_SIZE = 500; 
             let lastError = null;
 
             for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                 try {
-                    // キャッシュを強制的に無効化するためにランダムなパラメータを追加
+                    // キャッシュバスターとプロキシURLの構築
                     const cacheBuster = `&_ts=${Date.now()}`;
                     const proxyUrl = `${PROXY_BASE_URL}?url=${encodeURIComponent(camera.url)}&id=${encodeURIComponent(camera.id)}&password=${encodeURIComponent(camera.password)}${cacheBuster}`;
                     
@@ -183,8 +183,6 @@
 
                     if (response.ok) {
                         const buffer = await response.arrayBuffer();
-                        
-                        // 💡 最終修正点: Blobを作成する際に Content-Type を強制的に 'image/jpeg' に設定する
                         const blob = new Blob([buffer], { type: 'image/jpeg' });
                         
                         // データのサイズチェック
@@ -195,18 +193,32 @@
                             if (attempt < MAX_RETRIES) {
                                 statusElement.textContent = `不完全データ。リトライ中 (${attempt}/${MAX_RETRIES})...`;
                                 await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-                                continue; // 次のループへ
+                                continue; 
                             }
                         }
 
-                        // 成功した場合、URLを作成して表示
+                        // 成功した場合、Blob URLを作成して表示
                         const imageUrl = URL.createObjectURL(blob);
                         
-                        imageElement.src = imageUrl;
+                        // 💡 最終調整点: 画像のロード成功/失敗を監視する
+                        const imageLoadPromise = new Promise((resolve, reject) => {
+                            // 成功した場合
+                            imageElement.onload = () => resolve(true);
+                            // 失敗した場合 (データが不正でブラウザがデコードできなかった場合)
+                            imageElement.onerror = () => reject(new Error('画像デコード失敗 (不正なデータ構造)'));
+                            
+                            // 画像ソースを設定し、ロードを開始
+                            imageElement.src = imageUrl;
+                        });
+
+                        await imageLoadPromise; // ロード完了を待つ
+
+                        // ロード成功後の処理
                         statusElement.textContent = 'OK';
                         statusElement.className = 'mt-3 text-center font-bold text-green-600';
                         console.log(`カメラ ${index + 1}: 取得成功 (試行 ${attempt}回目), サイズ: ${blob.size} bytes`);
                         return { success: true, camera: camera.name };
+                        
                     } else {
                         // サーバーエラー (401, 500など) の処理
                         const errorText = await response.text();
@@ -219,9 +231,9 @@
                         }
                     }
                 } catch (error) {
-                    // ネットワークエラー (Failed to fetch, net::ERR_FAILED) の処理
-                    lastError = `ネットワークエラー: ${error.message}`;
-                    console.error(`カメラ ${index + 1}: ネットワーク失敗 (試行 ${attempt}回目):`, error);
+                    // ネットワークエラー、または画像デコード失敗エラー
+                    lastError = `処理失敗: ${error.message}`;
+                    console.error(`カメラ ${index + 1}: 処理失敗 (試行 ${attempt}回目):`, error);
 
                     if (attempt < MAX_RETRIES) {
                         statusElement.textContent = `リトライ中 (${attempt}/${MAX_RETRIES})...`;
