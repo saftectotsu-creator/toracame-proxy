@@ -1,147 +1,90 @@
-const express = require('express');
-const axios = require('axios');
-const cors = require('cors');
-const { URL } = require('url');
-
-// Digest認証ライブラリ
-const AxiosDigestAuth = require('@mhoc/axios-digest-auth').default; 
+// server.js
+import express from "express";
+import cors from "cors";
+import fetch from "node-fetch";
+import { createProxyMiddleware } from "http-proxy-middleware";
+import DigestAuth from "@mhoc/axios-digest-auth";
+import axios from "axios";
 
 const app = express();
-const port = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;
 
-// CORSミドルウェアを全体に適用
 app.use(cors());
 app.use(express.json());
 
-// ====================================================================
-// 認証試行関数群 (変更なし)
-// ====================================================================
+// ====== Proxy endpoint for camera images ======
+app.get("/proxy", async (req, res) => {
+  const { url, user, pass } = req.query;
 
-// 1. Basic認証 (ヘッダー)
-async function attemptBasicAuth(url, id, password) {
-    const authHeader = `Basic ${Buffer.from(`${id}:${password}`).toString('base64')}`;
-    return axios.get(url, {
-        responseType: 'arraybuffer',
-        headers: {
-            'Authorization': authHeader,
-            'User-Agent': 'Mozilla/5.0'
-        },
-        timeout: 15000
+  if (!url) {
+    return res.status(400).json({ error: "Missing url parameter" });
+  }
+
+  console.log("------------------------------------------------");
+  console.log(`▶ リクエスト: ${url}`);
+
+  let buffer = null;
+
+  try {
+    // まず Basic 認証を試す
+    console.log("認証試行 1: Basic認証 (ヘッダー)");
+    const basicResp = await axios.get(url, {
+      responseType: "arraybuffer",
+      auth: {
+        username: user,
+        password: pass,
+      },
+      timeout: 8000,
     });
-}
 
-// 2. Digest認証
-async function attemptDigestAuth(url, id, password) {
-    const digestAuth = new AxiosDigestAuth({
-        username: id,
-        password: password
-    });
-
-    return digestAuth.request({
-        method: 'GET',
-        url: url,
-        responseType: 'arraybuffer',
-        headers: { 
-            'User-Agent': 'Mozilla/5.0',
-            'Connection': 'close' 
-        },
-        timeout: 15000,
-        validateStatus: (status) => status >= 200 && status < 500
-    });
-}
-
-// 3. URL埋め込み認証 (id:pass@host)
-async function attemptUrlAuth(url, id, password) {
-    const urlObj = new URL(url);
-    const newUrl = `${urlObj.protocol}//${encodeURIComponent(id)}:${encodeURIComponent(password)}@${urlObj.host}${urlObj.pathname}${urlObj.search}`;
-    return axios.get(newUrl, {
-        responseType: 'arraybuffer',
-        headers: { 
-            'User-Agent': 'Mozilla/5.0',
-            'Connection': 'close' 
-        },
-        timeout: 15000
-    });
-}
-
-// ====================================================================
-// プロキシエンドポイント
-// ====================================================================
-app.get('/proxy', async (req, res) => {
-    const { url, id, password } = req.query;
-
-    if (!url) {
-        return res.status(400).send('URL is required.');
+    if (basicResp.status === 200) {
+      console.log("✅ Basic認証成功");
+      buffer = Buffer.from(basicResp.data);
     }
-    
-    // 💡 CORSヘッダーを可能な限り早期に設定
-    res.set('Access-Control-Allow-Origin', '*'); 
+  } catch (err) {
+    console.log("Basic認証失敗 (401)。Digest認証を試行します。");
+  }
 
-    try {
-        let response;
+  try {
+    if (!buffer) {
+      const digestAuth = new DigestAuth({ username: user, password: pass });
+      const digestResp = await digestAuth.request({
+        method: "GET",
+        url,
+        responseType: "arraybuffer",
+        timeout: 8000,
+      });
 
-        // 認証ロジック (Basic → URL → Digest の順序は維持)
-        if (!id || !password) {
-            console.log('匿名アクセスを試行');
-            response = await axios.get(url, {
-                responseType: 'arraybuffer',
-                headers: { 'User-Agent': 'Mozilla/5.0' },
-                timeout: 15000
-            });
-        } else {
-            try {
-                console.log('認証試行 1: Basic認証');
-                response = await attemptBasicAuth(url, id, password);
-            } catch (error) {
-                if (error.response && error.response.status === 401) {
-                    
-                    console.log('Basic失敗 → URL認証へ (強制フォールバック)');
-                    try {
-                        response = await attemptUrlAuth(url, id, password);
-                    } catch (err2) {
-                        if (err2.response && err2.response.status === 401) {
-                            
-                            console.log('URL認証失敗 → Digest認証へ');
-                            response = await attemptDigestAuth(url, id, password);
-                        } else {
-                            throw err2;
-                        }
-                    }
-                } else {
-                    throw error;
-                }
-            }
-        }
-
-        if (response) {
-            
-            // 💡 修正点 1: Content-Typeを image/jpeg に強制
-            res.set('Content-Type', 'image/jpeg');
-            
-            // 💡 修正点 2: キャッシュを完全に禁止するヘッダーを強制挿入
-            res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-            res.set('Pragma', 'no-cache');
-            res.set('Expires', '0');
-
-            console.log('✅ 認証成功。画像データをクライアントに送信します。');
-            // 画像データをクライアントに送信
-            return res.send(Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data));
-        }
-    } catch (error) {
-        console.error('プロキシエラー:', error.message);
-        
-        const status = error.response ? error.response.status : 500;
-        const statusText = error.response ? error.response.statusText : 'Internal Server Error';
-        
-        // エラー時もCORSを設定
-        res.set('Access-Control-Allow-Origin', '*');
-        res.status(status).send(`カメラサーバーエラー: ${status} ${statusText}。詳細: ${error.message}`);
+      if (digestResp.status === 200) {
+        console.log("✅ Digest認証成功");
+        buffer = Buffer.from(digestResp.data);
+      }
     }
+  } catch (err) {
+    console.error("Digest認証失敗:", err.message);
+  }
+
+  // 画像が取得できなかった場合
+  if (!buffer) {
+    console.error("❌ 画像取得失敗");
+    return res.status(500).json({ error: "Failed to fetch image" });
+  }
+
+  // ====== JPEGヘッダーを探してゴミを除去 ======
+  const start = buffer.indexOf(Buffer.from([0xff, 0xd8]));
+  if (start > 0) {
+    console.warn(`⚠️ JPEGヘッダーの前に ${start} バイトのゴミを検出 → 削除`);
+    buffer = buffer.slice(start);
+  }
+
+  // ====== レスポンス返却 ======
+  res.set("Content-Type", "image/jpeg");
+  res.set("Access-Control-Allow-Origin", "*");
+  console.log("✅ クリーン済み画像をクライアントに送信します。");
+  res.send(buffer);
 });
 
-// ====================================================================
-// サーバー起動
-// ====================================================================
-app.listen(port, () => {
-    console.log(`サーバー起動: ポート ${port}`);
+// ====== 起動 ======
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
