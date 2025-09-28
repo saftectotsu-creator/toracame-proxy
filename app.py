@@ -1,12 +1,13 @@
 # ---------------------------------------------------------------------
-# 💡 バージョン識別: V1.6 (SDカードステータスチェック機能追加)
+# 💡 バージョン識別: V1.9 (SDカードステータスエラーのJSON化を徹底)
 # ---------------------------------------------------------------------
 import os
 import requests
 from flask import Flask, request, Response
 from urllib.parse import urlparse, urlunparse, quote
-from requests.auth import HTTPBasicAuth, HTTPDigestAuth # HTTPDigestAuthをインポート
-import time # デバッグ用にインポート
+from requests.auth import HTTPBasicAuth, HTTPDigestAuth
+from lxml import etree # XML解析用ライブラリ
+import json # JSON応答用
 
 # Flaskアプリケーションの初期化
 app = Flask(__name__)
@@ -22,10 +23,10 @@ app.after_request(add_cors_headers)
 
 # ====================================================================
 # プロキシエンドポイント (画像取得)
+# (V1.6から変更なし)
 # ====================================================================
 @app.route('/proxy', methods=['GET'])
 def proxy_image():
-    # ... (この関数はV1.5から変更なし)
     # 1. クエリパラメータの取得
     url = request.args.get('url')
     id = request.args.get('id')
@@ -149,7 +150,7 @@ def proxy_image():
         )
 
 # ====================================================================
-# SDカードステータス確認エンドポイント (新規追加)
+# SDカードステータス確認エンドポイント (XML解析対応)
 # ====================================================================
 @app.route('/status', methods=['GET'])
 def check_camera_status():
@@ -158,26 +159,22 @@ def check_camera_status():
     password = request.args.get('password')
 
     if not url:
-        return Response('URL is required.', status=400)
+        # 💡 常にJSONを返すように修正
+        return Response(json.dumps({'error': 'URLが必要です。'}), status=400, mimetype='application/json')
     
     camera_identifier = url.split('//')[1].split(':')[0] if '//' in url else url
     
-    # 💡 任意のステータス取得URLに置換
-    # ここでは、カメラのベースURLからステータスページのURLを推測します。
-    # 画像取得URLの一部をステータス取得用のURLに置き換えます。
-    # 例: .../axis-cgi/jpg/image.cgi... -> .../axis-cgi/param.cgi?action=list&group=System.Storage
-    
+    # 💡 SDカードステータス取得用のパス
     parsed_url = urlparse(url)
-    # パス部分をステータス取得用の一般的なAxisカメラのパスに置き換える
-    status_path = '/axis-cgi/param.cgi?action=list&group=System.Storage.SDCard'
+    status_path = '/axis-cgi/disks/list.cgi'
     
-    # 新しいステータスURLを作成 (query部分はSDカードステータス取得用URLで上書き)
-    status_url = urlunparse(parsed_url._replace(path=status_path, query=''))
+    # 新しいステータスURLを作成
+    status_url = urlunparse(parsed_url._replace(path=status_path, query='diskid=all'))
     
     print(f"[{camera_identifier}] SDカードステータスチェックURL: {status_url}")
 
     try:
-        # 画像取得ロジックと同じ認証シーケンスでリクエストを試行
+        # 認証試行シーケンス
         
         # 1. Basic認証
         auth_basic = HTTPBasicAuth(id, password)
@@ -187,30 +184,72 @@ def check_camera_status():
             # 2. Digest認証
             auth_digest = HTTPDigestAuth(id, password)
             response = requests.get(status_url, auth=auth_digest, verify=False, timeout=10)
-            
-        if response.status_code == 200:
-            content = response.text
-            # 💡 ステータス文字列を簡易的にチェック
-            # Axisカメラの場合、以下のような値が入っていることが多いです:
-            # System.Storage.SDCard.Status=ok
-            
-            if 'Status=ok' in content.lower() or 'status=mounted' in content.lower():
-                return Response('マウントOK', status=200)
-            elif 'Status=error' in content.lower() or 'status=notpresent' in content.lower():
-                 return Response('エラー/未挿入', status=200)
-            else:
-                 # 想定外の応答の場合、ログ全体を返す
-                return Response(f'未知の応答: {content[:100]}...', status=200)
         
-        # 認証失敗またはその他のエラー
-        return Response(f'認証失敗/通信エラー (Status: {response.status_code})', status=response.status_code)
+        # 💡 ステータスコードが200以外の場合、一律でJSONエラーを返す
+        if response.status_code != 200:
+            print(f"[{camera_identifier}] SDカードステータス取得: 認証/通信失敗 (Status: {response.status_code})")
+            # 💡 常にJSONを返すように修正
+            return Response(json.dumps({'error': f'SDカードステータス: 認証または通信に失敗しました (Status: {response.status_code})'}), 
+                            status=200, # クライアントに正常な応答として返し、エラーメッセージを処理させる
+                            mimetype='application/json')
+
+        # ステータスコードが200の場合、XML解析に進む
+        content = response.text
+        
+        # XML解析
+        try:
+            # DTD参照を削除または無視し、不正なXML構造のエラーを防ぐ
+            parser = etree.XMLParser(resolve_entities=False, no_network=True)
+            root = etree.fromstring(content.encode('utf-8'), parser)
+            
+            disk_data = {}
+            
+            # 💡 修正: ネームスペースを無視して全てのdisk要素を検索 (より堅牢な方法)
+            for disk in root.findall('.//{*}disk'):
+                disk_id = disk.get('diskid')
+                status = disk.get('status', 'UNKNOWN')
+                freesize = disk.get('freesize')
+                
+                # diskidが存在しない要素はスキップする
+                if not disk_id:
+                    continue
+
+                if freesize:
+                    try:
+                        # バイトをGBに変換 (1GB = 1024^3 バイト)
+                        free_gb = round(int(freesize) / (1024 * 1024 * 1024), 2)
+                        freesize_display = f"{free_gb} GB"
+                    except ValueError:
+                        freesize_display = 'N/A'
+                else:
+                    freesize_display = 'N/A'
+
+                disk_data[disk_id] = {
+                    'status': status,
+                    'freesize': freesize_display
+                }
+                
+            return Response(json.dumps(disk_data), status=200, mimetype='application/json')
+            
+        except etree.XMLSyntaxError as e:
+            print(f"[{camera_identifier}] XML解析エラー: {e}")
+            # 💡 常にJSONを返すように修正
+            return Response(json.dumps({'error': 'SDカードステータス: XML解析に失敗しました。カメラ応答が不正な可能性があります。'}), 
+                            status=200, # クライアントに正常な応答として返し、エラーメッセージを処理させる
+                            mimetype='application/json')
 
     except requests.exceptions.RequestException as e:
         print(f"[{camera_identifier}] SDカードチェック通信エラー: {e}")
-        return Response('通信エラー', status=500)
+        # 💡 常にJSONを返すように修正
+        return Response(json.dumps({'error': 'SDカードステータス: 通信エラーが発生しました。'}), 
+                        status=200, # クライアントに正常な応答として返し、エラーメッセージを処理させる
+                        mimetype='application/json')
     except Exception as e:
         print(f"[{camera_identifier}] SDカードチェック不明なエラー: {e}")
-        return Response('不明なエラー', status=500)
+        # 💡 常にJSONを返すように修正
+        return Response(json.dumps({'error': 'SDカードステータス: サーバー側で不明なエラーが発生しました。'}), 
+                        status=200, # クライアントに正常な応答として返し、エラーメッセージを処理させる
+                        mimetype='application/json')
 
 # ====================================================================
 # サーバー起動
