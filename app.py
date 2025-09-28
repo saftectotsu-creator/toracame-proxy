@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------
-# 💡 バージョン識別: V1.0 (Basic認証とURL認証のみの安定版)
+# 💡 バージョン識別: V1.1 (Basic認証とURL認証のみの安定版 - requirements.txtと同期)
 # ---------------------------------------------------------------------
 import os
 import requests
@@ -11,7 +11,6 @@ from requests.auth import HTTPBasicAuth
 app = Flask(__name__)
 
 # CORSを許可する設定 (すべてのオリジンを許可)
-# 💡 NOTE: Flask-CORSをインストールしなくても、Responseヘッダーで設定可能
 def add_cors_headers(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = 'GET'

@@ -1,1 +1,1 @@
-💡 バージョン識別: V1.0 (Python/Flask 安定版)Flask==2.2.3requests==2.31.0
+💡 バージョン識別: V1.1 (Python/Flask 安定版 - コメント修正)Flask==2.2.3requests==2.31.0
