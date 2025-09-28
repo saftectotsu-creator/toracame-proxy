@@ -1,49 +1,85 @@
-import express from "express";
-import cors from "cors";
-import AxiosDigestAuth from "@mhoc/axios-digest-auth";  // ← 正しいimport
-import axios from "axios";
+// Node.jsとExpressを使ったHTTPプロキシサーバー
+const express = require('express');
+const cors = require('cors');
+// ダイジェスト認証をサポートするために、@mhoc/axios-digest-authライブラリをインポート
+const AxiosDigestAuth = require('@mhoc/axios-digest-auth').default; 
 
 const app = express();
+// Renderの環境変数PORTまたはデフォルトの3000を使用
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+// ----------------------------------------------------
+// CORS設定: すべてのオリジンからのリクエストを許可
+// ----------------------------------------------------
+app.use(cors({
+    origin: '*',
+    methods: ['GET'],
+}));
 
-app.get("/proxy", async (req, res) => {
-  try {
-    const { url, id, password } = req.query;
+/**
+ * 画像取得のためのプロキシエンドポイント
+ * クライアントから送られたカメラのURL、ID、PASSを使用して画像を代理取得する。
+ */
+app.get('/proxy', async (req, res) => {
+    // 1. パラメータの取得とデコード
+    const targetUrl = req.query.url;
+    const authId = req.query.id;
+    const authPassword = req.query.password;
 
-    if (!url || !id || !password) {
-      return res.status(400).send("Missing parameters");
+    if (!targetUrl || !authId || !authPassword) {
+        console.error('ERROR: Missing required query parameters (url, id, or password)');
+        return res.status(400).send('Missing required query parameters.');
     }
 
-    // Digest認証クライアント生成
-    const digestAuth = new AxiosDigestAuth({
-      username: id,
-      password: password,
+    console.log(`INFO: Proxying request for URL: ${targetUrl} (ID: ${authId})`);
+
+    // 2. Digest認証インスタンスの生成
+    const auth = new AxiosDigestAuth({
+        username: authId,
+        password: authPassword
     });
 
-    // まず Digest 認証リクエスト
-    const response = await digestAuth.request({
-      method: "GET",
-      url: url,
-      responseType: "arraybuffer",
-    });
+    try {
+        // 3. ターゲットカメラへのリクエスト実行（Digest認証を適用）
+        const response = await auth.request({
+            method: 'get',
+            url: targetUrl,
+            responseType: 'arraybuffer', // 画像データとしてバッファで受け取る
+            timeout: 10000 // 10秒でタイムアウト
+        });
 
-    res.set("Content-Type", "image/jpeg");
-    res.send(response.data);
+        // 4. レスポンスヘッダーの設定とデータ送信
+        const contentType = response.headers['content-type'] || 'application/octet-stream';
+        
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Length', response.data.length);
 
-  } catch (err) {
-    console.error("Proxy error:", err.message);
+        // キャッシュ防止ヘッダー
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
 
-    if (err.response) {
-      console.error("Camera response:", err.response.status, err.response.statusText);
-      res.status(err.response.status).send("Camera error: " + err.response.statusText);
-    } else {
-      res.status(500).send("サーバーエラー: " + err.message);
+        // 画像データをクライアントに送信
+        res.send(response.data);
+
+        console.log(`SUCCESS: Proxied request for ${authId} finished with status ${response.status} and size ${response.data.length} bytes.`);
+
+    } catch (error) {
+        // 5. エラーハンドリング
+        // ターゲットカメラが返すステータスコード（401, 404など）をクライアントに返す
+        const status = error.response ? error.response.status : error.code === 'ECONNABORTED' ? 408 : 500;
+        const statusText = error.response ? error.response.statusText : error.code === 'ECONNABORTED' ? 'Request Timeout' : 'Internal Server Error';
+        
+        console.error(`ERROR: Proxy failed for ${authId}. Status: ${status} ${statusText}. Message: ${error.message}`);
+        
+        res.status(status).send({ 
+            error: statusText,
+            message: `Failed to fetch image from target URL. Status: ${status}`
+        });
     }
-  }
 });
 
+// サーバーの起動
 app.listen(PORT, () => {
-  console.log(`Proxy server running on port ${PORT}`);
+    console.log(`Proxy server listening on port ${PORT}`);
 });
