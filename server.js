@@ -1,8 +1,9 @@
 // server.js
-import express from "express";
-import cors from "cors";
-import DigestAuth from "@mhoc/axios-digest-auth";
-import axios from "axios";
+const express = require('express');
+const axios = require('axios');
+const cors = require('cors');
+const { URL } = require('url');
+const AxiosDigestAuth = require('@mhoc/axios-digest-auth').default;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
