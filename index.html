@@ -23,57 +23,22 @@
             object-fit: contain; /* 画像全体を表示し、枠に合わせる */
         }
     </style>
-</head>
-<body class="bg-gray-100 font-sans">
-    <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-        <h1 class="text-3xl font-extrabold text-gray-800 mb-6">カメラライブビューア</h1>
-
-        <!-- CSV フォーマット説明エリア -->
-        <div class="bg-white p-4 border border-gray-200 rounded-xl shadow-md mb-6">
-            <p class="text-sm font-semibold text-gray-700 mb-2">CSVフォーマット: **URL**,"**カメラ名**","**ID**","**PASS**"</p>
-            <p class="text-xs text-gray-500">例: http://192.168.1.1/cgi/Entrance.user,pass123,Entrance,user,pass123</p>
-        </div>
-
-        <!-- コントロールパネル -->
-        <div class="flex flex-wrap items-center space-y-4 md:space-y-0 md:space-x-4 mb-8">
-            <!-- ファイル選択時の変更を検知したら即座に読み込みを試行するように修正 -->
-            <input type="file" id="csvFile" accept=".csv" class="hidden" onchange="handleFileSelected(this)">
-            
-            <button onclick="document.getElementById('csvFile').click()" class="px-4 py-2 bg-gray-500 text-white font-semibold rounded-lg hover:bg-gray-600 transition duration-150 shadow-md">
-                ファイルを選択
-                <span id="fileNameDisplay" class="ml-2 text-sm text-gray-200">未選択</span>
-            </button>
-            
-            <!-- 読み込みボタンは、ファイル選択時の処理をトリガーするよう変更 -->
-            <button onclick="document.getElementById('csvFile').click()" class="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition duration-150 shadow-md">
-                CSVを読み込む (ファイルを選択)
-            </button>
-            
-            <span id="cameraCount" class="text-lg font-bold text-orange-600 ml-4">カメラ 0台を登録しました</span>
-
-            <div class="flex space-x-2 ml-auto">
-                <button id="refreshButton" onclick="fetchImages()" class="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md">
-                    全ての画像を再取得
-                </button>
-                <button onclick="alert('PDF保存機能は未実装です。')" class="px-6 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition duration-150 shadow-md">
-                    PDFとして保存
-                </button>
-            </div>
-        </div>
-
-        <!-- 取得結果ステータス -->
-        <div class="mb-6">
-            <span id="fetchStatus" class="text-lg font-semibold text-gray-700">取得完了。成功: 0件 / 全体: 0件</span>
-        </div>
-
-        <!-- カメラグリッド -->
-        <div id="cameraGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <!-- カメラカードがここに動的に挿入されます -->
-        </div>
-
-    </div>
 
     <script>
+        // DOMContentLoaded イベントで実行されるように変更
+        document.addEventListener('DOMContentLoaded', () => {
+            // ファイル入力要素の参照を取得
+            const fileInput = document.getElementById('csvFile');
+            
+            // ファイル選択後にファイル名を表示するリスナーを追加
+            fileInput.addEventListener('change', (e) => {
+                displayFileName(e.target);
+            });
+            // 特に初期設定はなし。ユーザーがCSVをアップロードするのを待つ
+        });
+        
+        // 全てのJavaScript関数をDOMContentLoadedの外に定義
+
         let cameras = [];
         const PROXY_BASE_URL = 'https://toracame-proxy.onrender.com/proxy'; 
 
@@ -87,21 +52,18 @@
         }
 
         /**
-         * CSVファイルが選択されたときに、ファイル名を表示し、読み込み処理を開始する
-         * @param {HTMLInputElement} input file input element
-         */
-        function handleFileSelected(input) {
-            displayFileName(input); // ファイル名を表示
-            handleCsvUpload(); // 読み込み処理を開始
-        }
-
-        /**
          * CSVテキストをパースしてカメラオブジェクトの配列を返す
          */
         function parseCSV(text) {
+            // ログ: パース処理開始
+            console.log('--- CSVパース処理を開始 ---');
+
             // 改行で分割し、空行を削除
             const lines = text.trim().split(/\r?\n/).filter(line => line.trim() !== '');
-            if (lines.length < 2) return []; // ヘッダーとデータ行が最低1つ必要
+            if (lines.length < 2) {
+                console.warn('CSVデータが空またはヘッダー行のみです。');
+                return []; 
+            }
 
             const result = [];
             // ヘッダー行をスキップし、データ行から処理
@@ -123,12 +85,15 @@
             return result;
         }
 
+        /**
+         * 「CSVを読み込む」ボタンが押されたときに実行される
+         */
         function handleCsvUpload() {
             const fileInput = document.getElementById('csvFile');
             const file = fileInput.files[0];
 
-            // ログ: 読み込み開始を明示
-            console.log('--- CSVファイル読み込み処理を開始 ---');
+            // ログ: 読み込み開始を明示 (このログが出ればJSは実行されている)
+            console.log('--- CSVファイル読み込み処理を開始 (handleCsvUpload) ---');
 
             if (!file) {
                 // ファイルが選択されていない場合はエラーログを出して終了
@@ -176,9 +141,8 @@
         }
 
         // ==============================================
-        // UI レンダリングロジック
+        // UI レンダリングロジック (省略)
         // ==============================================
-
         function renderCameras() {
             const grid = document.getElementById('cameraGrid');
             grid.innerHTML = ''; // カメラグリッドをクリア
@@ -207,7 +171,7 @@
         }
         
         // ==============================================
-        // ヘルパー関数: 画像ロードとメモリ解放
+        // ヘルパー関数: 画像ロードとメモリ解放 (省略)
         // ==============================================
         function attemptImageLoad(imageElement, buffer, index) {
             return new Promise((resolve, reject) => {
@@ -232,7 +196,7 @@
 
 
         // ==============================================
-        // 最終最終調整版: 画像取得とデータクリーニングロジック
+        // 最終最終調整版: 画像取得とデータクリーニングロジック (省略)
         // ==============================================
         async function fetchSingleImage(camera, index) {
             const statusElement = document.getElementById(`status-${index}`);
@@ -362,7 +326,9 @@
 
         async function fetchImages() {
             if (cameras.length === 0) {
-                alert('カメラが登録されていません。CSVを読み込んでください。');
+                // ファイルが読み込まれていない場合はアラートをカスタムUIに変更
+                document.getElementById('fetchStatus').textContent = 'エラー: カメラが登録されていません。CSVを読み込んでください。';
+                console.error('画像取得エラー: カメラリストが空です。');
                 return;
             }
 
@@ -385,11 +351,56 @@
             refreshButton.disabled = false;
             refreshButton.textContent = '全ての画像を再取得';
         }
-
-        // ページロード時の初期化
-        window.onload = () => {
-             // 特に初期設定はなし。ユーザーがCSVをアップロードするのを待つ
-        };
     </script>
+</head>
+<body class="bg-gray-100 font-sans">
+    <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        <h1 class="text-3xl font-extrabold text-gray-800 mb-6">カメラライブビューア</h1>
+
+        <!-- CSV フォーマット説明エリア -->
+        <div class="bg-white p-4 border border-gray-200 rounded-xl shadow-md mb-6">
+            <p class="text-sm font-semibold text-gray-700 mb-2">CSVフォーマット: **URL**,"**カメラ名**","**ID**","**PASS**"</p>
+            <p class="text-xs text-gray-500">例: http://192.168.1.1/cgi/Entrance.user,pass123,Entrance,user,pass123</p>
+        </div>
+
+        <!-- コントロールパネル -->
+        <div class="flex flex-wrap items-center space-y-4 md:space-y-0 md:space-x-4 mb-8">
+            <!-- 変更点1: onchangeを削除 -->
+            <input type="file" id="csvFile" accept=".csv" class="hidden"> 
+            
+            <!-- ファイル選択ボタンは、ダイアログを開くだけ -->
+            <button onclick="document.getElementById('csvFile').click()" class="px-4 py-2 bg-gray-500 text-white font-semibold rounded-lg hover:bg-gray-600 transition duration-150 shadow-md">
+                ファイルを選択
+                <span id="fileNameDisplay" class="ml-2 text-sm text-gray-200">未選択</span>
+            </button>
+            
+            <!-- 変更点2: クリックで読み込み処理を強制実行 -->
+            <button onclick="handleCsvUpload()" class="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition duration-150 shadow-md">
+                CSVを読み込む (実行)
+            </button>
+            
+            <span id="cameraCount" class="text-lg font-bold text-orange-600 ml-4">カメラ 0台を登録しました</span>
+
+            <div class="flex space-x-2 ml-auto">
+                <button id="refreshButton" onclick="fetchImages()" class="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md">
+                    全ての画像を再取得
+                </button>
+                <button onclick="console.log('PDF保存機能は未実装です。');" class="px-6 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition duration-150 shadow-md">
+                    PDFとして保存
+                </button>
+            </div>
+        </div>
+
+        <!-- 取得結果ステータス -->
+        <div class="mb-6">
+            <span id="fetchStatus" class="text-lg font-semibold text-gray-700">取得完了。成功: 0件 / 全体: 0件</span>
+        </div>
+
+        <!-- カメラグリッド -->
+        <div id="cameraGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <!-- カメラカードがここに動的に挿入されます -->
+        </div>
+
+    </div>
 </body>
 </html>
