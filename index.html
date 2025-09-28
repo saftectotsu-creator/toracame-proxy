@@ -1,404 +1,421 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
+    <!-- 💡 日本語の文字化けを防ぐため、UTF-8を明示的に指定 -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>カメラ監視ビューア (プロキシ接続対応)</title>
-    <!-- Tailwind CSS をロード -->
+    <title>カメラ画像ビューア (マルチカメラ対応)</title>
+    <!-- Tailwind CSS (CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .image-container {
-            width: 100%;
-            height: 180px; /* 画像の縦横比を考慮した固定高さ */
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background-color: #f3f4f6;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        .camera-image {
-            width: 100%;
-            height: 100%;
-            object-fit: contain; /* 画像全体を表示し、枠に合わせる */
-        }
+        /* フォント設定 */
+        body { font-family: 'Inter', 'Noto Sans JP', sans-serif; background-color: #f7f9fb; }
+        /* カードのスタイル */
+        .camera-card { max-width: 300px; }
+        /* モーダル背景 */
+        .modal-overlay { background-color: rgba(0, 0, 0, 0.6); }
+        /* カスタムファイルインプットのスタイル */
+        .file-input-label { cursor: pointer; border: 1px solid #ccc; background-color: #fff; padding: 0.5rem 1rem; border-radius: 0.5rem; }
     </style>
+    <!-- jsPDFライブラリ (PDF生成用) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+<body class="p-6">
+
+    <!-- 認証モーダル (初期表示) -->
+    <div id="authModal" class="fixed inset-0 z-50 flex items-center justify-center modal-overlay">
+        <div class="bg-white p-8 rounded-lg shadow-2xl w-96">
+            <h2 class="text-2xl font-bold mb-4 text-gray-800">アクセス認証</h2>
+            <p class="mb-4 text-sm text-gray-600">このシステムを使用するには認証が必要です。</p>
+            <div class="mb-4">
+                <label for="username" class="block text-sm font-medium text-gray-700">ID</label>
+                <input type="text" id="username" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" value="saftec">
+            </div>
+            <div class="mb-6">
+                <label for="password" class="block text-sm font-medium text-gray-700">パスワード</label>
+                <input type="password" id="password" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" value="camcheck">
+            </div>
+            <button id="loginButton" class="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold hover:bg-indigo-700 transition duration-150">ログイン</button>
+            <p id="authMessage" class="mt-3 text-sm text-red-500 hidden"></p>
+        </div>
+    </div>
+
+    <!-- メインコンテンツ (認証成功後に表示) -->
+    <div id="mainContent" class="hidden">
+        <header class="mb-8 border-b pb-4">
+            <h1 class="text-3xl font-extrabold text-gray-900">カメラ画像ビューア (マルチカメラ対応)</h1>
+            <p class="mt-2 text-sm text-gray-600">CSVフォーマット: **"URL", "カメラ名", "ID", "PASS"**</p>
+            <p class="text-xs text-gray-500">例: http://192.168.1.1/cgi-bin/image.cgi,Entrance,user,pass123</p>
+        </header>
+
+        <section class="flex items-center space-x-4 mb-8 p-4 bg-white rounded-xl shadow-lg">
+            <div class="flex items-center space-x-2">
+                <input type="file" id="csvFileInput" accept=".csv" class="hidden">
+                <label for="csvFileInput" class="file-input-label text-sm text-gray-700 hover:bg-gray-50 transition duration-150">ファイルを選択</label>
+                <span id="fileNameDisplay" class="text-sm text-gray-500">セフテックサンプル.CSV</span>
+            </div>
+            
+            <button id="loadCsvButton" class="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-150 shadow-md">CSVを読み込む</button>
+            
+            <span id="statusMessage" class="text-sm text-indigo-600 font-medium">カメラ4台を登録しました</span>
+
+            <button id="fetchImagesButton" class="bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md ml-auto">全ての画像を再取得</button>
+            <button id="savePdfButton" class="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-700 transition duration-150 shadow-md" onclick="saveAsPdf()">PDFとして保存</button>
+        </section>
+
+        <p id="resultMessage" class="text-sm text-green-600 font-semibold mb-6">取得完了: 成功: 4件 / 全体: 4件</p>
+
+        <!-- カメラ画像表示エリア -->
+        <div id="cameraGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <!-- JavaScriptでここにカメラカードが挿入されます -->
+        </div>
+
+        <!-- 定期PDF生成設定 (新しいセクション) -->
+        <section class="mt-12 p-6 bg-yellow-50 border-l-4 border-yellow-500 rounded-lg shadow-inner">
+            <h3 class="text-xl font-bold text-yellow-800 mb-4">定期PDF生成設定</h3>
+            <div class="flex items-center space-x-4">
+                <label for="pdfInterval" class="text-gray-700">間隔:</label>
+                <select id="pdfInterval" class="border border-gray-300 rounded-md p-2">
+                    <option value="0">無効</option>
+                    <option value="600000">10分ごと (テスト用)</option>
+                    <option value="1800000">30分ごと</option>
+                    <option value="3600000">1時間ごと</option>
+                </select>
+                <button id="togglePdfScheduler" class="bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition duration-150 shadow-md">PDF生成を開始</button>
+                <span id="pdfStatus" class="text-sm text-gray-600">ステータス: 無効</span>
+            </div>
+            <p class="mt-2 text-xs text-yellow-700">※ この機能はブラウザが閉じられると停止します。定期的な自動保存には別途サーバー側の設定が必要です。</p>
+        </section>
+    </div>
+
 
     <script>
-        // DOMContentLoaded イベントで実行されるように変更
-        document.addEventListener('DOMContentLoaded', () => {
-            // ファイル入力要素の参照を取得
-            const fileInput = document.getElementById('csvFile');
-            
-            // ファイル選択後にファイル名を表示するリスナーを追加
-            fileInput.addEventListener('change', (e) => {
-                displayFileName(e.target);
-            });
-            // 特に初期設定はなし。ユーザーがCSVをアップロードするのを待つ
+        const PROXY_URL = "https://toracame-proxy.onrender.com/proxy"; 
+        const CAMERA_STATUS_URL = "https://toracame-proxy.onrender.com/status"; // SDカードチェック用
+        let cameras = []; 
+        let pdfIntervalId = null; 
+
+        // ====================================================================
+        // 認証ロジック
+        // ====================================================================
+        document.getElementById('loginButton').addEventListener('click', () => {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const authMessage = document.getElementById('authMessage');
+
+            if (username === 'saftec' && password === 'camcheck') {
+                document.getElementById('authModal').classList.add('hidden');
+                document.getElementById('mainContent').classList.remove('hidden');
+                authMessage.classList.add('hidden');
+                initializeApp();
+            } else {
+                authMessage.textContent = '認証情報が正しくありません。';
+                authMessage.classList.remove('hidden');
+            }
         });
-        
-        // 全てのJavaScript関数をDOMContentLoadedの外に定義
 
-        let cameras = [];
-        const PROXY_BASE_URL = 'https://toracame-proxy.onrender.com/proxy'; 
+        // ====================================================================
+        // 初期化とイベントリスナー設定
+        // ====================================================================
+        function initializeApp() {
+            // イベントリスナー設定
+            document.getElementById('loadCsvButton').addEventListener('click', handleCsvLoad);
+            document.getElementById('fetchImagesButton').addEventListener('click', fetchImages);
+            document.getElementById('csvFileInput').addEventListener('change', (event) => {
+                const fileName = event.target.files[0] ? event.target.files[0].name : 'ファイルを選択';
+                document.getElementById('fileNameDisplay').textContent = fileName;
+            });
+            document.getElementById('togglePdfScheduler').addEventListener('click', togglePdfScheduler);
 
-        // ==============================================
-        // CSV 処理ロジック
-        // ==============================================
-
-        function displayFileName(input) {
-            const display = document.getElementById('fileNameDisplay');
-            display.textContent = input.files[0] ? input.files[0].name : '未選択';
+            // 初期表示用のダミーデータ (Renderデプロイ後の動作確認用)
+            cameras = [
+                { url: "http://szfb263.glddns.com:8080/axis-cgi/jpg/image.cgi?resolution=320x240&compression=20", name: "sapporo1", id: "root", password: "saftec1" },
+                { url: "http://kozou132.moonlight.warplink.ne.jp:8080/axis-cgi/jpg/image.cgi?resolution=320x240&compression=25&camera=1", name: "sapporo2", id: "root", password: "saftec1" },
+                { url: "http://kozou133.moonlight.warplink.ne.jp:8080/axis-cgi/jpg/image.cgi?resolution=320x240&compression=25&camera=1", name: "sapporo3", id: "root", password: "saftec1" },
+                { url: "http://kozou125.moonlight.warplink.ne.jp:8080/axis-cgi/jpg/image.cgi?resolution=320x240&compression=25&camera=1", name: "sapporo4", id: "root", password: "saftec1" }
+            ];
+            renderCameraGrid();
+            fetchImages();
         }
 
-        /**
-         * CSVテキストをパースしてカメラオブジェクトの配列を返す
-         */
-        function parseCSV(text) {
-            // ログ: パース処理開始
-            console.info('--- CSVパース処理を開始 ---');
 
-            // 改行で分割し、空行を削除
-            const lines = text.trim().split(/\r?\n/).filter(line => line.trim() !== '');
-            if (lines.length < 2) {
-                console.warn('CSVデータが空またはヘッダー行のみです。');
-                return []; 
-            }
-
-            const result = [];
-            // ヘッダー行をスキップし、データ行から処理
-            for (let i = 1; i < lines.length; i++) {
-                const parts = lines[i].split(',');
-                
-                // CSVフォーマット: URL,カメラ名,ID,PASS
-                if (parts.length >= 4) {
-                    result.push({
-                        url: parts[0].trim(),
-                        name: parts[1].trim(),
-                        id: parts[2].trim(),
-                        password: parts[3].trim(),
-                    });
-                } else {
-                    console.warn(`CSVパース警告: 行 ${i + 1} は不正な形式です。スキップしました: ${lines[i]}`);
-                }
-            }
-            return result;
-        }
-
-        /**
-         * 「CSVを読み込む」ボタンが押されたときに実行される
-         */
-        function handleCsvUpload() {
-            const fileInput = document.getElementById('csvFile');
+        // ====================================================================
+        // CSV処理
+        // ====================================================================
+        function handleCsvLoad() {
+            const fileInput = document.getElementById('csvFileInput');
             const file = fileInput.files[0];
-
-            // ログ: 読み込み開始を明示
-            console.info('--- CSVファイル読み込み処理を開始 (handleCsvUpload) ---');
-
             if (!file) {
-                // ファイルが選択されていない場合はエラーログを出して終了
-                console.error('致命的エラー: ファイル入力要素にファイルがセットされていません。');
-                document.getElementById('fetchStatus').textContent = 'エラー：ファイルを選択してください。';
+                alert('CSVファイルを選択してください。');
                 return;
             }
 
             const reader = new FileReader();
-            
-            // ファイルの読み込みが成功した時の処理
             reader.onload = (e) => {
                 try {
-                    const csvText = e.target.result;
-                    cameras = parseCSV(csvText);
-
-                    // ログ: 読み込み成功とカメラ台数
-                    console.info(`CSVファイルを正常に読み込みました。カメラ ${cameras.length}台を検出。`);
-
-                    if (cameras.length === 0) {
-                        document.getElementById('cameraCount').textContent = 'カメラ 0台を登録しました (データ不正の可能性あり)';
-                        console.error('CSVファイルに有効なカメラデータが見つかりませんでした。ヘッダーとデータ行を確認してください。');
-                        renderCameras(); // ゼロ件としてレンダリングを試みる
-                        return;
-                    }
-
-                    document.getElementById('cameraCount').textContent = `カメラ ${cameras.length}台を登録しました`;
-                    renderCameras();
-
+                    const content = e.target.result;
+                    cameras = parseCsv(content);
+                    document.getElementById('statusMessage').textContent = `カメラ${cameras.length}台を登録しました`;
+                    renderCameraGrid();
+                    fetchImages();
                 } catch (error) {
-                    console.error('CSVパース処理中に重大なエラーが発生しました:', error);
-                    // ユーザーフレンドリーなメッセージも表示
-                    document.getElementById('fetchStatus').textContent = `エラー：CSV処理失敗。コンソールを確認してください。`;
+                    alert('CSVファイルの解析中にエラーが発生しました。フォーマットを確認してください。');
+                    console.error('CSV Parsing Error:', error);
                 }
             };
-
-            // ファイルの読み込みが失敗した時の処理（主にエンコーディング関連）
-            reader.onerror = (error) => {
-                console.error('FileReaderエラー: ファイルの読み込みに失敗しました。', error);
-                document.getElementById('fetchStatus').textContent = `エラー：ファイルの読み込みに失敗しました。エンコーディングを確認してください。`;
-            };
-
-            // 日本語のCSVファイルを想定し、Shift_JISで読み込み
-            reader.readAsText(file, 'Shift_JIS'); 
+            reader.readAsText(file, 'Shift_JIS'); // 日本語CSVの標準エンコーディング
         }
 
-        // ==============================================
-        // UI レンダリングロジック
-        // ==============================================
-        function renderCameras() {
-            const grid = document.getElementById('cameraGrid');
-            grid.innerHTML = ''; // カメラグリッドをクリア
-
-            if (cameras.length === 0) {
-                grid.innerHTML = '<p class="text-gray-500 col-span-4">CSVを読み込んでカメラを登録してください。</p>';
-                document.getElementById('fetchStatus').textContent = '取得完了。成功: 0件 / 全体: 0件';
-                return;
-            }
-
-            cameras.forEach((camera, index) => {
-                const cameraCard = document.createElement('div');
-                cameraCard.className = 'bg-white shadow-lg rounded-xl p-4 transition duration-200 hover:shadow-xl';
-                cameraCard.innerHTML = `
-                    <h3 class="text-lg font-semibold text-gray-800 mb-2">${index + 1}. ${camera.name}</h3>
-                    <div class="image-container">
-                        <img id="image-${index}" class="camera-image" src="https://placehold.co/100x100/eeeeee/000000?text=未取得" alt="${camera.name}画像">
-                    </div>
-                    <p id="status-${index}" class="mt-3 text-center font-bold text-gray-500">未取得</p>
-                `;
-                grid.appendChild(cameraCard);
-            });
-
-            // ロード後、すぐに画像取得を開始
-            fetchImages();
-        }
-        
-        // ==============================================
-        // ヘルパー関数: 画像ロードとメモリ解放
-        // ==============================================
-        function attemptImageLoad(imageElement, buffer, index) {
-            return new Promise((resolve, reject) => {
-                const blob = new Blob([buffer], { type: 'image/jpeg' });
-                const imageUrl = URL.createObjectURL(blob);
-                
-                // 成功した場合
-                imageElement.onload = () => {
-                    URL.revokeObjectURL(imageUrl); // メモリ解放
-                    resolve(true);
-                };
-                // 失敗した場合 (データが不正でブラウザがデコードできなかった場合)
-                imageElement.onerror = () => {
-                    URL.revokeObjectURL(imageUrl); // メモリ解放
-                    reject(new Error('画像デコード失敗 (不正なデータ構造)'));
-                };
-                
-                // 画像ソースを設定し、ロードを開始
-                imageElement.src = imageUrl;
-            });
-        }
-
-
-        // ==============================================
-        // 画像取得とデータクリーニングロジック
-        // ==============================================
-        async function fetchSingleImage(camera, index) {
-            const statusElement = document.getElementById(`status-${index}`);
-            const imageElement = document.getElementById(`image-${index}`);
+        function parseCsv(csvText) {
+            const lines = csvText.trim().split('\n');
+            const cameraList = [];
             
-            // UIをリセット
-            statusElement.textContent = '取得中...';
-            statusElement.className = 'mt-3 text-center font-bold text-gray-500';
-            imageElement.src = 'https://placehold.co/100x100/eeeeee/000000?text=Loading';
-
-            const MAX_RETRIES = 5; 
-            const RETRY_DELAY_MS = 1500; 
-            const MIN_IMAGE_SIZE = 500; 
-            let lastError = null;
-
-            // コンソールログ開始
-            console.info(`カメラ ${index + 1}: ${camera.name} の画像取得を開始...`);
-
-            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-                try {
-                    // キャッシュバスターとプロキシURLの構築
-                    const cacheBuster = `&_ts=${Date.now()}`;
-                    const proxyUrl = `${PROXY_BASE_URL}?url=${encodeURIComponent(camera.url)}&id=${encodeURIComponent(camera.id)}&password=${encodeURIComponent(camera.password)}${cacheBuster}`;
-                    
-                    const response = await fetch(proxyUrl);
-
-                    if (response.ok) {
-                        const buffer = await response.arrayBuffer();
-                        let cleanedBuffer = buffer; // クリーニング前のオリジナルバッファ
-
-                        // データのサイズチェック
-                        if (buffer.byteLength < MIN_IMAGE_SIZE) {
-                            lastError = `画像データが小さすぎます (${buffer.byteLength} bytes)。`;
-                            console.warn(`カメラ ${index + 1}: ${lastError} リトライ実行`);
-                            
-                            if (attempt < MAX_RETRIES) {
-                                statusElement.textContent = `不完全データ。リトライ中 (${attempt}/${MAX_RETRIES})...`;
-                                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-                                continue; 
-                            }
-                        }
-
-                        // ロード試行とデータクリーニング
-                        try {
-                            await attemptImageLoad(imageElement, buffer, index);
-                            
-                            // 1. クリーンアップなしで成功した場合
-                            statusElement.textContent = 'OK';
-                            statusElement.className = 'mt-3 text-center font-bold text-green-600';
-                            console.info(`カメラ ${index + 1}: 取得成功 (試行 ${attempt}回目), サイズ: ${buffer.byteLength} bytes`); 
-                            return { success: true, camera: camera.name };
-
-                        } catch (loadError) {
-                            // 2. クリーンアップなしでデコード失敗した場合
-                            if (loadError.message === '画像デコード失敗 (不正なデータ構造)' && attempt < MAX_RETRIES) {
-                                console.warn(`カメラ ${index + 1}: デコード失敗。データクリーニングを試みます...`);
-                                
-                                // JPEGマジックバイト (0xFF, 0xD8) を探すロジック
-                                const dataView = new DataView(buffer);
-                                let skipBytes = 0;
-                                while (skipBytes < buffer.byteLength - 1) {
-                                    // 最初の 0xFFD8 を探す
-                                    if (dataView.getUint8(skipBytes) === 0xFF && dataView.getUint8(skipBytes + 1) === 0xD8) {
-                                        break; 
-                                    }
-                                    skipBytes++;
-                                }
-
-                                if (skipBytes > 0 && skipBytes < buffer.byteLength) {
-                                    // 不正なバイトが発見された場合、それらをスキップ
-                                    console.info(`カメラ ${index + 1}: 先頭の ${skipBytes} バイトをクリーンアップしました。再ロード試行。`); 
-                                    cleanedBuffer = buffer.slice(skipBytes);
-                                    
-                                    // クリーンアップされたバッファで再度ロードを試みる
-                                    await attemptImageLoad(imageElement, cleanedBuffer, index);
-
-                                    // 3. クリーンアップ後のロード成功
-                                    statusElement.textContent = 'OK (Cleaned)';
-                                    statusElement.className = 'mt-3 text-center font-bold text-green-600';
-                                    console.info(`カメラ ${index + 1}: クリーンアップ後、取得成功 (試行 ${attempt}回目), サイズ: ${cleanedBuffer.byteLength} bytes`); 
-                                    return { success: true, camera: camera.name };
-                                }
-                                
-                                // クリーンアップしてもダメだった場合、通常のリトライへ
-                                lastError = 'デコード失敗後、データクリーニングも効果なし。';
-                                console.error(`カメラ ${index + 1}: ${lastError} 次のリトライへ。`);
-                                statusElement.textContent = `デコード失敗。リトライ中 (${attempt}/${MAX_RETRIES})...`;
-                                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-                                continue;
-
-                            } else {
-                                // その他のロードエラー (MAX_RETRIESに到達したデコード失敗など) は、外側の catch へ
-                                throw loadError;
-                            }
-                        }
-                        
-                    } else {
-                        // サーバーエラー (401, 500など) の処理
-                        lastError = `認証またはプロキシエラー: ${response.status} ${response.statusText}`;
-                        console.error(`カメラ ${index + 1}: 取得失敗 (試行 ${attempt}回目): ${lastError}`);
-                        
-                        if (attempt < MAX_RETRIES) {
-                            statusElement.textContent = `リトライ中 (${attempt}/${MAX_RETRIES})...`;
-                            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-                        }
-                    }
-                } catch (error) {
-                    // ネットワークエラー、または画像デコード失敗エラー
-                    lastError = `ネットワーク/デコード失敗: ${error.message.substring(0, 40)}`; 
-                    console.error(`カメラ ${index + 1}: 処理失敗 (試行 ${attempt}回目):`, error);
-
-                    if (attempt < MAX_RETRIES) {
-                        statusElement.textContent = `リトライ中 (${attempt}/${MAX_RETRIES})...`;
-                        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-                    }
+            // ヘッダー行をスキップし、データ行を処理
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                
+                // カンマ区切りで解析
+                const parts = line.split(',');
+                if (parts.length >= 4) {
+                    cameraList.push({
+                        url: parts[0].trim(),
+                        name: parts[1].trim(),
+                        id: parts[2].trim(),
+                        password: parts[3].trim()
+                    });
                 }
             }
-
-            // 全てのリトライが失敗した場合
-            statusElement.textContent = `エラー: ${lastError}`;
-            statusElement.className = 'mt-3 text-center font-bold text-red-600';
-            imageElement.src = 'https://placehold.co/100x100/ffbbbb/800000?text=エラー';
-            console.error(`カメラ ${index + 1}: 最終取得失敗`);
-            return { success: false, camera: camera.name };
+            return cameraList;
         }
+
+        // ====================================================================
+        // UI描画
+        // ====================================================================
+        function renderCameraGrid() {
+            const grid = document.getElementById('cameraGrid');
+            grid.innerHTML = '';
+            cameras.forEach((camera, index) => {
+                const card = document.createElement('div');
+                card.id = `camera-card-${index}`;
+                card.className = 'camera-card bg-white p-4 rounded-xl shadow-lg transition duration-200 hover:shadow-xl';
+                card.innerHTML = `
+                    <h3 class="text-lg font-semibold mb-2 text-gray-800">${index + 1}. ${camera.name}</h3>
+                    <div id="image-container-${index}" class="w-full h-48 bg-gray-200 flex items-center justify-center rounded-lg overflow-hidden relative">
+                        <span class="text-gray-500">画像未取得</span>
+                        <img id="image-${index}" class="absolute inset-0 w-full h-full object-cover hidden" alt="${camera.name} の画像">
+                    </div>
+                    <p id="status-${index}" class="mt-2 text-center text-sm font-medium text-red-500">画像未取得</p>
+                    <p id="time-${index}" class="mt-1 text-center text-xs text-gray-500">--</p>
+                    <p id="sd-status-${index}" class="mt-1 text-center text-xs font-semibold text-gray-700">SDカード: 確認中...</p>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        // ====================================================================
+        // 画像取得とSDカードステータスチェック
+        // ====================================================================
+        async function fetchSingleImage(camera, index) {
+            const imageElement = document.getElementById(`image-${index}`);
+            const containerElement = document.getElementById(`image-container-${index}`);
+            const statusElement = document.getElementById(`status-${index}`);
+            const timeElement = document.getElementById(`time-${index}`);
+            
+            // ロード中表示
+            imageElement.classList.add('hidden');
+            containerElement.innerHTML = `<svg class="animate-spin h-5 w-5 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
+            statusElement.textContent = '取得中...';
+            statusElement.className = 'mt-2 text-center text-sm font-medium text-indigo-500';
+
+            // 1. 画像取得
+            const proxyUrl = `${PROXY_URL}?url=${encodeURIComponent(camera.url)}&id=${encodeURIComponent(camera.id)}&password=${encodeURIComponent(camera.password)}`;
+            let success = false;
+            let errorMessage = '不明なエラー';
+
+            try {
+                const response = await fetch(proxyUrl);
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    imageElement.src = URL.createObjectURL(blob);
+                    imageElement.onload = () => {
+                        URL.revokeObjectURL(imageElement.src);
+                    };
+                    
+                    containerElement.innerHTML = ''; // ローディングアニメーションを削除
+                    imageElement.classList.remove('hidden');
+                    statusElement.textContent = 'OK';
+                    statusElement.className = 'mt-2 text-center text-sm font-medium text-green-600';
+                    timeElement.textContent = new Date().toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    success = true;
+                } else if (response.status === 401) {
+                    errorMessage = '認証失敗 (ID/PASSエラー)';
+                    throw new Error(errorMessage);
+                } else {
+                    errorMessage = `サーバーエラー (Status: ${response.status})`;
+                    throw new Error(errorMessage);
+                }
+            } catch (error) {
+                imageElement.classList.add('hidden');
+                containerElement.innerHTML = `<span class="text-gray-500">画像未取得</span>`;
+                statusElement.textContent = `エラー: ${errorMessage}`;
+                statusElement.className = 'mt-2 text-center text-sm font-medium text-red-500';
+                timeElement.textContent = '--';
+                console.error(`カメラ ${index + 1} エラー:`, error.message);
+            }
+            
+            // 2. SDカードステータスチェック（プロキシ経由）
+            const sdStatusElement = document.getElementById(`sd-status-${index}`);
+            sdStatusElement.textContent = 'SDカード: 確認中...';
+            sdStatusElement.className = 'mt-1 text-center text-xs font-semibold text-gray-700';
+
+            try {
+                // カメラのステータスを取得するプロキシURL (実装はサーバー側)
+                const statusProxyUrl = `${CAMERA_STATUS_URL}?url=${encodeURIComponent(camera.url)}&id=${encodeURIComponent(camera.id)}&password=${encodeURIComponent(camera.password)}`;
+                const statusResponse = await fetch(statusProxyUrl);
+                
+                if (statusResponse.ok) {
+                    const statusText = await statusResponse.text();
+                    // サーバー側で取得したステータスをそのまま表示
+                    if (statusText.includes('OK') || statusText.includes('Mounted')) {
+                        sdStatusElement.textContent = 'SDカード: マウントOK';
+                        sdStatusElement.className = 'mt-1 text-center text-xs font-semibold text-green-600';
+                    } else {
+                         sdStatusElement.textContent = `SDカード: ${statusText}`;
+                         sdStatusElement.className = 'mt-1 text-center text-xs font-semibold text-red-600';
+                    }
+                } else {
+                    sdStatusElement.textContent = `SDカード: 取得失敗 (Status: ${statusResponse.status})`;
+                    sdStatusElement.className = 'mt-1 text-center text-xs font-semibold text-red-600';
+                }
+            } catch (error) {
+                sdStatusElement.textContent = 'SDカード: 通信エラー';
+                sdStatusElement.className = 'mt-1 text-center text-xs font-semibold text-red-600';
+            }
+            
+            return success;
+        }
+
 
         async function fetchImages() {
             if (cameras.length === 0) {
-                document.getElementById('fetchStatus').textContent = 'エラー: カメラが登録されていません。CSVを読み込んでください。';
-                console.error('画像取得エラー: カメラリストが空です。');
+                document.getElementById('resultMessage').textContent = 'カメラが登録されていません。CSVを読み込んでください。';
                 return;
             }
 
-            const refreshButton = document.getElementById('refreshButton');
-            refreshButton.disabled = true;
-            refreshButton.textContent = '取得処理中...';
-
-            const promises = cameras.map((camera, index) => fetchSingleImage(camera, index));
-            const results = await Promise.allSettled(promises);
+            document.getElementById('resultMessage').textContent = '画像を取得中...';
+            
+            const results = await Promise.allSettled(cameras.map((camera, index) => fetchSingleImage(camera, index)));
 
             let successCount = 0;
             results.forEach(result => {
-                if (result.status === 'fulfilled' && result.value.success) {
+                if (result.status === 'fulfilled' && result.value === true) {
                     successCount++;
                 }
             });
 
-            document.getElementById('fetchStatus').textContent = `取得完了。成功: ${successCount}件 / 全体: ${cameras.length}件`;
-
-            refreshButton.disabled = false;
-            refreshButton.textContent = '全ての画像を再取得';
+            document.getElementById('resultMessage').textContent = `取得完了: 成功: ${successCount}件 / 全体: ${cameras.length}件`;
+            document.getElementById('resultMessage').className = `text-sm font-semibold mb-6 ${successCount === cameras.length ? 'text-green-600' : 'text-red-600'}`;
         }
+
+        // ====================================================================
+        // PDF生成・保存
+        // ====================================================================
+
+        // PDF保存処理 (手動/自動共通)
+        async function saveAsPdf(isScheduled = false) {
+            const timestamp = new Date().toLocaleString('ja-JP', { 
+                year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+                hour12: false
+            }).replace(/[/ :]/g, '-');
+            const filename = isScheduled ? `camera_report_auto_${timestamp}.pdf` : `camera_report_${timestamp}.pdf`;
+            
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const width = pdf.internal.pageSize.getWidth();
+            const margin = 10;
+            let currentY = margin;
+            
+            // タイトル
+            pdf.setFontSize(18);
+            pdf.text('カメラ画像レポート', margin, currentY);
+            currentY += 10;
+            
+            // タイムスタンプ
+            pdf.setFontSize(10);
+            pdf.text(`レポート生成日時: ${timestamp}`, margin, currentY);
+            currentY += 5;
+            
+            // カメラグリッド全体をキャプチャしてPDFに追加
+            const content = document.getElementById('cameraGrid');
+            
+            const canvas = await html2canvas(content, {
+                scale: 2, // 高解像度でキャプチャ
+                useCORS: true,
+                allowTaint: true
+            });
+
+            const imgData = canvas.toDataURL('image/jpeg', 1.0);
+            const imgWidth = width - (2 * margin);
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+            
+            // A4ページ内に収まるか確認し、必要なら新しいページを追加
+            if (currentY + imgHeight > pdf.internal.pageSize.getHeight() - margin) {
+                pdf.addPage();
+                currentY = margin;
+            }
+
+            pdf.addImage(imgData, 'JPEG', margin, currentY, imgWidth, imgHeight);
+            
+            // PDFをダウンロード
+            pdf.save(filename);
+            
+            if (isScheduled) {
+                console.log(`[PDF SCHEDULER] 自動PDF生成完了: ${filename}`);
+            } else {
+                 console.log(`PDF生成完了: ${filename}`);
+            }
+        }
+        
+        // 定期PDF生成の制御
+        function togglePdfScheduler() {
+            const intervalSelect = document.getElementById('pdfInterval');
+            const interval = parseInt(intervalSelect.value, 10);
+            const toggleButton = document.getElementById('togglePdfScheduler');
+            const statusSpan = document.getElementById('pdfStatus');
+
+            if (pdfIntervalId) {
+                // 停止処理
+                clearInterval(pdfIntervalId);
+                pdfIntervalId = null;
+                toggleButton.textContent = 'PDF生成を開始';
+                toggleButton.classList.remove('bg-red-600', 'hover:bg-red-700');
+                toggleButton.classList.add('bg-green-600', 'hover:bg-green-700');
+                statusSpan.textContent = 'ステータス: 無効';
+                console.log('[PDF SCHEDULER] 自動PDF生成を停止しました。');
+            } else if (interval > 0) {
+                // 開始処理
+                
+                // 初回実行
+                fetchImages().then(() => saveAsPdf(true)); 
+                
+                // 定期実行
+                pdfIntervalId = setInterval(() => {
+                    fetchImages().then(() => saveAsPdf(true));
+                }, interval);
+
+                toggleButton.textContent = 'PDF生成を停止';
+                toggleButton.classList.remove('bg-green-600', 'hover:bg-green-700');
+                toggleButton.classList.add('bg-red-600', 'hover:bg-red-700');
+                statusSpan.textContent = `ステータス: 実行中 (${interval / 60000}分ごと)`;
+                console.log(`[PDF SCHEDULER] 自動PDF生成を開始しました。間隔: ${interval / 60000}分`);
+            } else {
+                alert('間隔を選択してください。');
+            }
+        }
+
     </script>
-</head>
-<body class="bg-gray-100 font-sans">
-    <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-        <h1 class="text-3xl font-extrabold text-gray-800 mb-6">カメラライブビューア</h1>
-
-        <!-- CSV フォーマット説明エリア -->
-        <div class="bg-white p-4 border border-gray-200 rounded-xl shadow-md mb-6">
-            <p class="text-sm font-semibold text-gray-700 mb-2">CSVフォーマット: **URL**,"**カメラ名**","**ID**","**PASS**"</p>
-            <p class="text-xs text-gray-500">例: http://192.168.1.1/cgi/Entrance.user,pass123,Entrance,user,pass123</p>
-        </div>
-
-        <!-- コントロールパネル -->
-        <div class="flex flex-wrap items-center space-y-4 md:space-y-0 md:space-x-4 mb-8">
-            <!-- ファイル入力要素 (非表示) -->
-            <input type="file" id="csvFile" accept=".csv" class="hidden"> 
-            
-            <!-- ファイル選択ボタン -->
-            <button onclick="document.getElementById('csvFile').click()" class="px-4 py-2 bg-gray-500 text-white font-semibold rounded-lg hover:bg-gray-600 transition duration-150 shadow-md">
-                ファイルを選択
-                <span id="fileNameDisplay" class="ml-2 text-sm text-gray-200">未選択</span>
-            </button>
-            
-            <!-- 読み込み実行ボタン -->
-            <button onclick="handleCsvUpload()" class="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition duration-150 shadow-md">
-                CSVを読み込む (実行)
-            </button>
-            
-            <span id="cameraCount" class="text-lg font-bold text-orange-600 ml-4">カメラ 0台を登録しました</span>
-
-            <div class="flex space-x-2 ml-auto">
-                <button id="refreshButton" onclick="fetchImages()" class="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md">
-                    全ての画像を再取得
-                </button>
-                <button onclick="console.log('PDF保存機能は未実装です。');" class="px-6 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition duration-150 shadow-md">
-                    PDFとして保存
-                </button>
-            </div>
-        </div>
-
-        <!-- 取得結果ステータス -->
-        <div class="mb-6">
-            <span id="fetchStatus" class="text-lg font-semibold text-gray-700">取得完了。成功: 0件 / 全体: 0件</span>
-        </div>
-
-        <!-- カメラグリッド -->
-        <div id="cameraGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <!-- カメラカードがここに動的に挿入されます -->
-        </div>
-
-    </div>
 </body>
 </html>
