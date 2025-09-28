@@ -1,79 +1,161 @@
-// Node.jsとExpressを使ったHTTPプロキシサーバー
+// ---------------------------------------------------------------------
+// 💡 バージョン識別: V1.3 (Digest認証テスト/多重認証ロジック搭載版 - require('require')エラー修正済み)
+// ---------------------------------------------------------------------
 const express = require('express');
-const axios = require('axios'); // Simple axiosを使用
-const cors = require('require');
+const axios = require('axios');
+const cors = require('cors'); // <<< require('cors') に修正
+const { URL } = require('url');
+
+// Digest認証ライブラリ
+const AxiosDigestAuth = require('@mhoc/axios-digest-auth').default; 
 
 const app = express();
-// Renderの環境変数PORTまたはデフォルトの3000を使用
-const PORT = process.env.PORT || 3000;
+const port = process.env.PORT || 10000;
 
-// ----------------------------------------------------
-// CORS設定: すべてのオリジンからのリクエストを許可
-// ----------------------------------------------------
-app.use(cors({
-    origin: '*',
-    methods: ['GET'],
-}));
+// CORSミドルウェアを全体に適用
+app.use(cors());
+app.use(express.json());
 
-/**
- * 画像取得のためのプロキシエンドポイント
- */
-app.get('/proxy', async (req, res) => {
-    // 1. パラメータの取得とデコード
-    const targetUrl = req.query.url;
-    const authId = req.query.id;
-    const authPassword = req.query.password;
+// ====================================================================
+// 認証試行関数群 (変更なし)
+// ====================================================================
 
-    if (!targetUrl || !authId || !authPassword) {
-        console.error('ERROR: Missing required query parameters (url, id, or password)');
-        return res.status(400).send('Missing required query parameters.');
+// 1. Basic認証 (ヘッダー)
+async function attemptBasicAuth(url, id, password) {
+    const authHeader = `Basic ${Buffer.from(`${id}:${password}`).toString('base64')}`;
+    return axios.get(url, {
+        responseType: 'arraybuffer',
+        headers: {
+            'Authorization': authHeader,
+            'User-Agent': 'Mozilla/5.0'
+        },
+        timeout: 15000
+    });
+}
+
+// 2. Digest認証
+async function attemptDigestAuth(url, id, password) {
+    // 💡 注意: Digest認証はサーバー側の依存関係が必要。
+    // package.json に '@mhoc/axios-digest-auth' が入っていることを確認してください。
+    
+    // AxiosDigestAuth は以前の500エラーの原因となったため、このデプロイが成功するか確認が必要です。
+    // 成功した場合、このロジックがDigest認証を行います。
+    try {
+        const digestAuth = new AxiosDigestAuth({
+            username: id,
+            password: password
+        });
+
+        return digestAuth.request({
+            method: 'GET',
+            url: url,
+            responseType: 'arraybuffer',
+            headers: { 
+                'User-Agent': 'Mozilla/5.0',
+                'Connection': 'close' 
+            },
+            timeout: 15000,
+            validateStatus: (status) => status >= 200 && status < 500
+        });
+    } catch (e) {
+        // AxiosDigestAuth のインスタンス作成自体に失敗した場合（モジュールが見つからないなど）
+        console.error('DigestAuthライブラリの呼び出しに失敗しました:', e.message);
+        throw new Error('Digest認証ライブラリ設定エラー');
     }
+}
 
-    console.log(`INFO: Proxying request for URL: ${targetUrl} (ID: ${authId})`);
+// 3. URL埋め込み認証 (id:pass@host)
+async function attemptUrlAuth(url, id, password) {
+    const urlObj = new URL(url);
+    const newUrl = `${urlObj.protocol}//${encodeURIComponent(id)}:${encodeURIComponent(password)}@${urlObj.host}${urlObj.pathname}${urlObj.search}`;
+    return axios.get(newUrl, {
+        responseType: 'arraybuffer',
+        headers: { 
+            'User-Agent': 'Mozilla/5.0',
+            'Connection': 'close' 
+        },
+        timeout: 15000
+    });
+}
+
+// ====================================================================
+// プロキシエンドポイント
+// ====================================================================
+app.get('/proxy', async (req, res) => {
+    const { url, id, password } = req.query;
+
+    if (!url) {
+        return res.status(400).send('URL is required.');
+    }
+    
+    // 💡 CORSヘッダーを可能な限り早期に設定
+    res.set('Access-Control-Allow-Origin', '*'); 
 
     try {
-        // 2. ターゲットURLへのリクエスト実行（Basic認証を使用）
-        const response = await axios({
-            method: 'get',
-            url: targetUrl,
-            responseType: 'arraybuffer', // 画像データとしてバッファで受け取る
-            auth: {
-                username: authId,
-                password: authPassword,
-            },
-            timeout: 10000 
-        });
+        let response;
 
-        // 3. レスポンスヘッダーの設定とデータ送信
-        const contentType = response.headers['content-type'] || 'application/octet-stream';
-        
-        res.setHeader('Content-Type', contentType);
-        res.setHeader('Content-Length', response.data.length);
+        // 認証ロジック (Basic → URL → Digest の順序は維持)
+        if (!id || !password) {
+            console.log('匿名アクセスを試行');
+            response = await axios.get(url, {
+                responseType: 'arraybuffer',
+                headers: { 'User-Agent': 'Mozilla/5.0' },
+                timeout: 15000
+            });
+        } else {
+            try {
+                console.log('認証試行 1: Basic認証');
+                response = await attemptBasicAuth(url, id, password);
+            } catch (error) {
+                if (error.response && error.response.status === 401) {
+                    
+                    console.log('Basic失敗 → URL認証へ (強制フォールバック)');
+                    try {
+                        response = await attemptUrlAuth(url, id, password);
+                    } catch (err2) {
+                        if (err2.response && err2.response.status === 401) {
+                            
+                            console.log('URL認証失敗 → Digest認証へ');
+                            response = await attemptDigestAuth(url, id, password);
+                        } else {
+                            throw err2;
+                        }
+                    }
+                } else {
+                    throw error;
+                }
+            }
+        }
 
-        // キャッシュ防止ヘッダー
-        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
+        if (response) {
+            
+            // 💡 修正点 1: Content-Typeを image/jpeg に強制
+            res.set('Content-Type', 'image/jpeg');
+            
+            // 💡 修正点 2: キャッシュを完全に禁止するヘッダーを強制挿入
+            res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+            res.set('Pragma', 'no-cache');
+            res.set('Expires', '0');
 
-        res.send(response.data);
-
-        console.log(`SUCCESS: Proxied request for ${authId} finished with status ${response.status} and size ${response.data.length} bytes.`);
-
+            console.log('✅ 認証成功。画像データをクライアントに送信します。');
+            // 画像データをクライアントに送信
+            return res.send(Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data));
+        }
     } catch (error) {
-        // 4. エラーハンドリング
-        const status = error.response ? error.response.status : error.code === 'ECONNABORTED' ? 408 : 500;
-        const statusText = error.response ? error.response.statusText : error.code === 'ECONNABORTED' ? 'Request Timeout' : 'Internal Server Error';
+        console.error('プロキシエラー:', error.message);
         
-        console.error(`ERROR: Proxy failed for ${authId}. Status: ${status} ${statusText}. Message: ${error.message}`);
+        const status = error.response ? error.response.status : 500;
+        const statusText = error.response ? error.response.statusText : 'Internal Server Error';
         
-        res.status(status).send({ 
-            error: statusText,
-            message: `Failed to fetch image from target URL. Status: ${status}`
-        });
+        // エラー時もCORSを設定
+        res.set('Access-Control-Allow-Origin', '*');
+        res.status(status).send(`カメラサーバーエラー: ${status} ${statusText}。詳細: ${error.message}`);
     }
 });
 
-// サーバーの起動
-app.listen(PORT, () => {
-    console.log(`Proxy server listening on port ${PORT}`);
+// ====================================================================
+// サーバー起動
+// ====================================================================
+app.listen(port, () => {
+    console.log(`サーバー起動: ポート ${port}`);
 });
